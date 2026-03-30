@@ -139,6 +139,80 @@ class ConversationService:
         ).order_by(ConversationSession.created_at.desc()).offset(skip).limit(limit).all()
     
     @staticmethod
+    def get_conversations_list(
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> dict:
+        """
+        Retrieve conversations from the database with optional filters.
+        
+        Args:
+            user_id: Optional user identifier to filter conversations.
+            session_id: Optional session identifier to filter conversations.
+            limit: Maximum number of results (default: 100, max: 1000).
+            offset: Number of results to skip for pagination (default: 0).
+            
+        Returns:
+            Dictionary containing conversations list and metadata.
+        """
+        # Validate pagination parameters
+        if limit < 1 or limit > 1000:
+            limit = 100
+        if offset < 0:
+            offset = 0
+        
+        from database import SessionLocal
+        db = SessionLocal()
+        
+        try:
+            # Fetch conversations with filters
+            conversations = ConversationService.get_all_conversations(
+                db=db,
+                user_id=user_id,
+                session_id=session_id,
+                skip=offset,
+                limit=limit
+            )
+            
+            # Get total count for the same filters
+            query = db.query(Conversation)
+            if user_id:
+                query = query.filter(Conversation.user_id == user_id)
+            if session_id:
+                query = query.filter(Conversation.session_id == session_id)
+            total_count = query.count()
+            
+            # Format conversation data
+            conversation_list = []
+            for conv in conversations:
+                conversation_list.append({
+                    "id": conv.id,
+                    "conversation_id": str(conv.conversation_id),
+                    "question": conv.question,
+                    "answer": conv.answer,
+                    "status": conv.status.value if conv.status else None,
+                    "error": conv.error,
+                    "user_id": conv.user_id,
+                    "session_id": str(conv.session_id) if conv.session_id else None,
+                    "response_time": conv.response_time,
+                    "created_at": conv.created_at.isoformat() if conv.created_at else None,
+                    "updated_at": conv.updated_at.isoformat() if conv.updated_at else None
+                })
+            
+            return {
+                "conversations": conversation_list,
+                "total": total_count,
+                "limit": limit,
+                "offset": offset,
+                "status": "success"
+            }
+        
+        finally:
+            db.close()
+    
+    @staticmethod
     def delete_conversation(db: Session, conversation_id: str) -> bool:
         """Delete a conversation"""
         conversation = db.query(Conversation).filter(

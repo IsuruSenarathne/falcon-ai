@@ -1,16 +1,21 @@
 """
 Core RAG Service Module
 Handles all business logic for the RAG (Retrieval-Augmented Generation) system.
+Stores conversations in the database.
 """
 
 import os
 import json
+import time
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.vectorstores import Chroma
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from dotenv import load_dotenv
+from database import SessionLocal
+from db_service import ConversationService
+from models import ConversationStatus
 
 
 class RAGService:
@@ -51,7 +56,7 @@ Question: {question}
         self.prompt = ChatPromptTemplate.from_template(template)
         
         # Initialize Model
-        self.llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+        self.llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
         
         # Create the RAG Chain
         self.rag_chain = (
@@ -61,15 +66,17 @@ Question: {question}
             | StrOutputParser()
         )
     
-    def query(self, question: str) -> str:
+    def query(self, question: str, user_id: str = None, session_id: str = None) -> dict:
         """
-        Process a single question through the RAG chain.
+        Process a single question through the RAG chain and store in database.
         
         Args:
             question: The question to answer.
+            user_id: Optional user identifier for tracking.
+            session_id: Optional session identifier for grouping conversations.
             
         Returns:
-            The generated answer from the RAG chain.
+            Dictionary containing conversation_id, question, answer, and metadata.
             
         Raises:
             ValueError: If the question is empty.
@@ -78,17 +85,74 @@ Question: {question}
         if not question or not question.strip():
             raise ValueError("Question cannot be empty")
         
-        return self.rag_chain.invoke(question)
+        db = SessionLocal()
+        start_time = time.time()
+        
+        try:
+            # Get answer from RAG chain
+            answer = self.rag_chain.invoke(question)
+            response_time = time.time() - start_time
+            
+            # Save conversation to database
+            conversation = ConversationService.save_conversation(
+                db=db,
+                question=question,
+                answer=answer,
+                status=ConversationStatus.SUCCESS,
+                user_id=user_id,
+                session_id=session_id,
+                response_time=response_time
+            )
+            
+            return {
+                "conversation_id": conversation.conversation_id,
+                "question": conversation.question,
+                "answer": conversation.answer,
+                "status": "success",
+                "response_time": response_time,
+                "created_at": conversation.created_at.isoformat()
+            }
+        
+        except Exception as e:
+            response_time = time.time() - start_time
+            
+            # Save error to database
+            try:
+                conversation = ConversationService.save_conversation(
+                    db=db,
+                    question=question,
+                    answer=None,
+                    status=ConversationStatus.ERROR,
+                    error=str(e),
+                    user_id=user_id,
+                    session_id=session_id,
+                    response_time=response_time
+                )
+                return {
+                    "conversation_id": conversation.conversation_id,
+                    "question": question,
+                    "answer": None,
+                    "error": str(e),
+                    "status": "error",
+                    "response_time": response_time
+                }
+            except:
+                raise
+        
+        finally:
+            db.close()
     
-    def batch_query(self, questions: list) -> list:
+    def batch_query(self, questions: list, user_id: str = None, session_id: str = None) -> dict:
         """
-        Process multiple questions through the RAG chain.
+        Process multiple questions through the RAG chain and store in database.
         
         Args:
             questions: List of questions to answer.
+            user_id: Optional user identifier for tracking.
+            session_id: Optional session identifier for grouping conversations.
             
         Returns:
-            List of dictionaries containing questions and answers.
+            Dictionary containing list of results with conversation details.
             
         Raises:
             ValueError: If questions list is empty or not a list.
@@ -99,26 +163,86 @@ Question: {question}
         if not questions:
             raise ValueError("Questions list cannot be empty")
         
+        db = SessionLocal()
         results = []
-        for question in questions:
-            if not question or not question.strip():
-                results.append({
-                    "question": question,
-                    "answer": None,
-                    "error": "Question cannot be empty"
-                })
-            else:
-                try:
-                    answer = self.query(question)
+        
+        try:
+            for question in questions:
+                start_time = time.time()
+                
+                if not question or not question.strip():
+                    # Save empty question error
+                    conversation = ConversationService.save_conversation(
+                        db=db,
+                        question=question,
+                        answer=None,
+                        status=ConversationStatus.ERROR,
+                        error="Question cannot be empty",
+                        user_id=user_id,
+                        session_id=session_id,
+                        response_time=0
+                    )
                     results.append({
-                        "question": question,
-                        "answer": answer
-                    })
-                except Exception as e:
-                    results.append({
+                        "conversation_id": conversation.conversation_id,
                         "question": question,
                         "answer": None,
-                        "error": str(e)
+                        "error": "Question cannot be empty",
+                        "status": "error"
                     })
+                else:
+                    try:
+                        # Get answer from RAG chain
+                        answer = self.rag_chain.invoke(question)
+                        response_time = time.time() - start_time
+                        
+                        # Save successful conversation
+                        conversation = ConversationService.save_conversation(
+                            db=db,
+                            question=question,
+                            answer=answer,
+                            status=ConversationStatus.SUCCESS,
+                            user_id=user_id,
+                            session_id=session_id,
+                            response_time=response_time
+                        )
+                        
+                        results.append({
+                            "conversation_id": conversation.conversation_id,
+                            "question": question,
+                            "answer": answer,
+                            "status": "success",
+                            "response_time": response_time
+                        })
+                    except Exception as e:
+                        response_time = time.time() - start_time
+                        
+                        # Save error conversation
+                        conversation = ConversationService.save_conversation(
+                            db=db,
+                            question=question,
+                            answer=None,
+                            status=ConversationStatus.ERROR,
+                            error=str(e),
+                            user_id=user_id,
+                            session_id=session_id,
+                            response_time=response_time
+                        )
+                        
+                        results.append({
+                            "conversation_id": conversation.conversation_id,
+                            "question": question,
+                            "answer": None,
+                            "error": str(e),
+                            "status": "error",
+                            "response_time": response_time
+                        })
+            
+            return {
+                "results": results,
+                "session_id": session_id,
+                "total": len(results),
+                "status": "success"
+            }
         
-        return results
+        finally:
+            db.close()
