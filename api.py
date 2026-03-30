@@ -1,11 +1,19 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from rag_service import RAGService
+from database import init_db
 
 # Initialize Flask app
 app = Flask(__name__)
 
+# Enable CORS
+CORS(app)
+
 # Initialize RAG Service
 rag_service = RAGService()
+
+# Initialize Database (creates tables if they don't exist)
+init_db()
 
 
 @app.route("/", methods=["GET"])
@@ -27,7 +35,8 @@ def query():
     Response:
     {
         "question": "Your question here",
-        "answer": "Generated answer from RAG chain"
+        "answer": "Generated answer from RAG chain",
+        "status": "success"
     }
     """
     try:
