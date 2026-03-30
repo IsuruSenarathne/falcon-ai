@@ -4,15 +4,13 @@ Handles all business logic for the RAG (Retrieval-Augmented Generation) system.
 Stores conversations in the database.
 """
 
-import os
 import json
 import time
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.vectorstores import Chroma
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-from dotenv import load_dotenv
 from database import SessionLocal
 from db_service import ConversationService
 from models import ConversationStatus
@@ -28,17 +26,12 @@ class RAGService:
         Args:
             data_file: Path to the JSON file containing the knowledge base.
         """
-        load_dotenv()
-        
-        # Setup API Key
-        os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY")
-        
         # Load data from JSON file
         with open(data_file, "r") as f:
             data = json.load(f)["data"]
-        
+
         # Create embeddings
-        self.embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
+        self.embeddings = OllamaEmbeddings(model="nomic-embed-text")
         
         # Create knowledge base
         knowledge_base = [f"Course: {title}. {desc}" for title, desc in data.items()]
@@ -56,7 +49,7 @@ Question: {question}
         self.prompt = ChatPromptTemplate.from_template(template)
         
         # Initialize Model
-        self.llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+        self.llm = ChatOllama(model="llama3.2:1b")
         
         # Create the RAG Chain
         self.rag_chain = (
