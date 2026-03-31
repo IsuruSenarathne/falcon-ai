@@ -1,4 +1,3 @@
-import json
 import time
 
 from langchain_ollama import ChatOllama, OllamaEmbeddings
@@ -9,18 +8,17 @@ from langchain_core.runnables import RunnablePassthrough
 
 from app.dto.conversation_dto import QueryRequest, QueryResponse
 from app.models.conversation import MessageStatus
+from app.repositories.knowledge_repository import KnowledgeRepository
 from app.services.conversation_service import ConversationService
 
 
 class RAGService:
 
-    def __init__(self, data_file: str = "data.json"):
-        with open(data_file, "r") as f:
-            data = json.load(f)["data"]
-
+    def __init__(self):
+        documents = KnowledgeRepository.load_documents()
         embeddings = OllamaEmbeddings(model="nomic-embed-text")
-        knowledge_base = [f"Course: {title}. {desc}" for title, desc in data.items()]
-        vectorstore = Chroma.from_texts(texts=knowledge_base, embedding=embeddings)
+        vectorstore = Chroma.from_texts(texts=documents, embedding=embeddings)
+        print(f"✓ Knowledge base loaded: {len(documents)} documents from database")
 
         template = """Answer the question based ONLY on the following context:
 {context}

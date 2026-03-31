@@ -9,7 +9,7 @@ def create_app() -> Flask:
     CORS(app)
 
     init_db()
-    app.rag_service = RAGService()
+    app.rag_service = RAGService()  # loads knowledge from DB
 
     from app.controllers.conversation_controller import conversation_bp
     app.register_blueprint(conversation_bp)
