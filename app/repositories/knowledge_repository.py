@@ -62,26 +62,41 @@ class KnowledgeRepository:
                 )
                 documents.append(doc)
 
-            # Load course modules as separate documents for finer retrieval
+            # Load course modules — joined with advisor info so every chunk is self-contained
             modules = db.execute(text("""
                 SELECT
                     c.course_name,
+                    c.course_code,
                     m.module_number,
                     m.module_title,
                     m.description,
                     m.duration_hours,
-                    m.is_mandatory
+                    m.is_mandatory,
+                    a.title        AS advisor_title,
+                    a.first_name   AS advisor_first,
+                    a.last_name    AS advisor_last,
+                    a.email        AS advisor_email,
+                    a.phone        AS advisor_phone,
+                    a.office_location,
+                    a.office_hours
                 FROM course_modules m
-                JOIN courses c ON m.course_id = c.course_id
+                JOIN courses  c ON m.course_id  = c.course_id
+                LEFT JOIN advisors a ON c.advisor_id = a.advisor_id
                 ORDER BY c.course_id, m.module_number
             """)).fetchall()
 
             for m in modules:
                 mandatory = "Mandatory" if m.is_mandatory else "Optional"
                 doc = (
-                    f"Course: {m.course_name} — Module {m.module_number}: {m.module_title}. "
+                    f"Course: {m.course_name} ({m.course_code}) — "
+                    f"Module {m.module_number}: {m.module_title}. "
                     f"{mandatory}. Duration: {m.duration_hours} hours. "
-                    f"Description: {m.description or 'N/A'}."
+                    f"Description: {m.description or 'N/A'}. "
+                    f"Advisor: {m.advisor_title or ''} {m.advisor_first or ''} {m.advisor_last or ''}, "
+                    f"email: {m.advisor_email or 'N/A'}, "
+                    f"phone: {m.advisor_phone or 'N/A'}, "
+                    f"office: {m.office_location or 'N/A'}, "
+                    f"hours: {m.office_hours or 'N/A'}."
                 )
                 documents.append(doc)
 
