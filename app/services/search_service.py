@@ -1,8 +1,8 @@
 import os
 import time
-import requests
 from typing import List, Optional
 from bs4 import BeautifulSoup
+import requests
 
 from langchain_ollama import ChatOllama
 from langchain_core.output_parsers import StrOutputParser
@@ -14,14 +14,13 @@ from app.services.conversation_service import ConversationService
 
 
 class SearchService:
-    """Service for web search + RAG-based answering using Google Custom Search API."""
+    """Service for web search + RAG-based answering using Brave Search API."""
 
     def __init__(self):
-        self.api_key = os.getenv("GOOGLE_API_KEY")
-        self.search_engine_id = os.getenv("GOOGLE_SEARCH_ENGINE_ID")
+        self.api_key = os.getenv("BRAVE_API_KEY")
 
-        if not self.api_key or not self.search_engine_id:
-            print("⚠ Warning: GOOGLE_API_KEY or GOOGLE_SEARCH_ENGINE_ID not set. Search will not work.")
+        if not self.api_key:
+            print("⚠ Warning: BRAVE_API_KEY not set. Search will not work.")
 
         # LLM for synthesizing answers from fetched content
         template = """Based on the following web search results, answer this question:
@@ -53,25 +52,22 @@ REASONING:
         if not req.question or not req.question.strip():
             raise ValueError("Question cannot be empty")
 
-        if not self.api_key or not self.search_engine_id:
-            raise ValueError("Search not configured. Set GOOGLE_API_KEY and GOOGLE_SEARCH_ENGINE_ID environment variables.")
+        if not self.api_key:
+            raise ValueError("Search not configured. Set BRAVE_API_KEY environment variable.")
 
         start = time.time()
         try:
-            # 1. Search Google
-            search_results = self._google_search(req.question)
+            # Search using Brave
+            search_results = self._brave_search(req.question)
             if not search_results:
                 raise ValueError("No search results found")
 
-            # 2. Filter out sponsored results
-            filtered_results = [r for r in search_results if not r.get("is_sponsored", False)][:5]
-            if not filtered_results:
-                filtered_results = search_results[:5]
+            # Fetch content from top 5 links
+            fetched_content = self._fetch_content_from_links(search_results[:5])
+            if not fetched_content:
+                raise ValueError("Could not fetch content from search results")
 
-            # 3. Fetch content from top 5 links
-            fetched_content = self._fetch_content_from_links(filtered_results)
-
-            # 4. Use LLM to synthesize answer from fetched content
+            # Use LLM to synthesize answer from fetched content
             combined_content = self._format_search_results(fetched_content)
             raw_response = self.answer_chain.invoke({
                 "question": req.question,
@@ -132,33 +128,56 @@ REASONING:
                 sources=[],
             )
 
-    def _google_search(self, query: str, num_results: int = 10) -> List[dict]:
-        """Search Google Custom Search API."""
-        url = "https://www.googleapis.com/customsearch/v1"
+    def _brave_search(self, query: str, num_results: int = 10) -> List[dict]:
+        """Search using Brave Search API."""
+        url = "https://api.search.brave.com/res/v1/web/search"
+        headers = {
+            "Accept": "application/json",
+            "X-Subscription-Token": self.api_key,
+        }
         params = {
             "q": query,
-            "key": self.api_key,
-            "cx": self.search_engine_id,
-            "num": num_results,
+            "count": num_results,
         }
 
-        response = requests.get(url, params=params)
-        response.raise_for_status()
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=10)
+            response.raise_for_status()
 
-        data = response.json()
-        results = data.get("items", [])
+            data = response.json()
+            print(f"Brave API response keys: {data.keys()}")
 
-        # Parse results
-        parsed_results = []
-        for item in results:
-            parsed_results.append({
-                "title": item.get("title"),
-                "link": item.get("link"),
-                "snippet": item.get("snippet"),
-                "is_sponsored": "sponsored" in item.get("link", "").lower(),
-            })
+            # Brave returns results in 'web' -> 'results'
+            web_data = data.get("web", {})
+            results = web_data.get("results", []) if isinstance(web_data, dict) else []
+            print(f"Raw results type: {type(results)}, count: {len(results)}")
 
-        return parsed_results
+            # Parse results
+            parsed_results = []
+            for item in results:
+                try:
+                    if not isinstance(item, dict):
+                        print(f"Warning: item is {type(item)}, skipping: {item}")
+                        continue
+
+                    parsed_results.append({
+                        "title": item.get("title", ""),
+                        "link": item.get("url", ""),
+                        "snippet": item.get("description", ""),
+                    })
+                except Exception as e:
+                    print(f"Error parsing result item: {e}")
+                    continue
+
+            print(f"✓ Found {len(parsed_results)} results from Brave Search API")
+            return parsed_results
+
+        except requests.exceptions.HTTPError as e:
+            print(f"✗ Brave API error: {e.response.status_code} - {e.response.text}")
+            raise Exception(f"Brave Search API error: {e.response.status_code}")
+        except Exception as e:
+            print(f"✗ Search error: {e}")
+            raise
 
     def _fetch_content_from_links(self, search_results: List[dict]) -> List[dict]:
         """Fetch and extract text content from URLs."""
@@ -183,7 +202,7 @@ REASONING:
         """Fetch and extract text content from a URL."""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             }
             response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
