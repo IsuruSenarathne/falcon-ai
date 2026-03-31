@@ -67,6 +67,25 @@ class ConversationsListResponse:
 
 
 @dataclass
+class ConversationResponse:
+    conversation: ConversationDTO
+    status: str = "success"
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class MessageResponse:
+    conversation_id: str
+    message: MessageDTO
+    status: str = "success"
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class MessagesResponse:
     conversation_id: str
     messages: List[MessageDTO]

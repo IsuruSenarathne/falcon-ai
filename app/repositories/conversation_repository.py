@@ -60,3 +60,33 @@ class ConversationRepository:
         if user_id:
             query = query.filter(Conversation.user_id == user_id)
         return query.count()
+
+    @staticmethod
+    def update_conversation(db: Session, conversation: "Conversation", title: Optional[str]) -> "Conversation":
+        if title is not None:
+            conversation.title = title
+        db.flush()
+        return conversation
+
+    @staticmethod
+    def delete_conversation(db: Session, conversation: "Conversation") -> None:
+        db.delete(conversation)
+        db.flush()
+
+    @staticmethod
+    def find_message(db: Session, conversation_id: str, message_id: str) -> Optional[Message]:
+        return db.query(Message).filter(
+            Message.conversation_id == conversation_id,
+            Message.message_id == message_id,
+        ).first()
+
+    @staticmethod
+    def update_message_content(db: Session, message: Message, content: str) -> Message:
+        message.content = content
+        db.flush()
+        return message
+
+    @staticmethod
+    def delete_message(db: Session, message: Message) -> None:
+        db.delete(message)
+        db.flush()

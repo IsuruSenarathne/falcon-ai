@@ -60,6 +60,39 @@ def get_conversations():
         return jsonify({"error": str(e), "status": "error"}), 500
 
 
+@conversation_bp.route("/conversations/<conversation_id>", methods=["GET", "PATCH", "DELETE"])
+def conversation(conversation_id: str):
+    if request.method == "GET":
+        try:
+            result = ConversationService.get_conversation(conversation_id)
+            if result is None:
+                return jsonify({"error": "Conversation not found", "status": "error"}), 404
+            return jsonify(result.to_dict()), 200
+        except Exception as e:
+            return jsonify({"error": str(e), "status": "error"}), 500
+
+    if request.method == "PATCH":
+        data = request.get_json() or {}
+        if "title" not in data:
+            return jsonify({"error": "Missing 'title' field"}), 400
+        try:
+            result = ConversationService.update_conversation(conversation_id, data["title"])
+            if result is None:
+                return jsonify({"error": "Conversation not found", "status": "error"}), 404
+            return jsonify(result.to_dict()), 200
+        except Exception as e:
+            return jsonify({"error": str(e), "status": "error"}), 500
+
+    # DELETE
+    try:
+        deleted = ConversationService.delete_conversation(conversation_id)
+        if not deleted:
+            return jsonify({"error": "Conversation not found", "status": "error"}), 404
+        return jsonify({"status": "success"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e), "status": "error"}), 500
+
+
 @conversation_bp.route("/conversations/<conversation_id>/messages", methods=["GET", "POST"])
 def messages(conversation_id: str):
     if request.method == "GET":
@@ -83,5 +116,38 @@ def messages(conversation_id: str):
         return jsonify(result.to_dict()), status_code
     except ValueError as e:
         return jsonify({"error": str(e), "status": "error"}), 400
+    except Exception as e:
+        return jsonify({"error": str(e), "status": "error"}), 500
+
+
+@conversation_bp.route("/conversations/<conversation_id>/messages/<message_id>", methods=["GET", "PATCH", "DELETE"])
+def message(conversation_id: str, message_id: str):
+    if request.method == "GET":
+        try:
+            result = ConversationService.get_message(conversation_id, message_id)
+            if result is None:
+                return jsonify({"error": "Message not found", "status": "error"}), 404
+            return jsonify(result.to_dict()), 200
+        except Exception as e:
+            return jsonify({"error": str(e), "status": "error"}), 500
+
+    if request.method == "PATCH":
+        data = request.get_json()
+        if not data or "content" not in data:
+            return jsonify({"error": "Missing 'content' field"}), 400
+        try:
+            result = ConversationService.update_message(conversation_id, message_id, data["content"])
+            if result is None:
+                return jsonify({"error": "Message not found", "status": "error"}), 404
+            return jsonify(result.to_dict()), 200
+        except Exception as e:
+            return jsonify({"error": str(e), "status": "error"}), 500
+
+    # DELETE
+    try:
+        deleted = ConversationService.delete_message(conversation_id, message_id)
+        if not deleted:
+            return jsonify({"error": "Message not found", "status": "error"}), 404
+        return jsonify({"status": "success"}), 200
     except Exception as e:
         return jsonify({"error": str(e), "status": "error"}), 500
