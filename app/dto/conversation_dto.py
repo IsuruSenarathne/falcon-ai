@@ -18,6 +18,21 @@ class QueryRequest:
 
 
 @dataclass
+class SearchRequest:
+    question: str
+    user_id: Optional[str] = None
+    session_id: Optional[str] = None
+
+    @staticmethod
+    def from_json(data: dict) -> "SearchRequest":
+        return SearchRequest(
+            question=data["question"],
+            user_id=data.get("user_id"),
+            session_id=data.get("session_id"),
+        )
+
+
+@dataclass
 class MessageDTO:
     message_id: str
     role: str
@@ -36,6 +51,21 @@ class QueryResponse:
     status: str
     response_time: float
     created_at: str
+    error: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class SearchResponse:
+    conversation_id: str
+    question: str
+    answer: Optional[str]
+    status: str
+    response_time: float
+    created_at: str
+    sources: List[str]
     error: Optional[str] = None
 
     def to_dict(self) -> dict:

@@ -2,6 +2,7 @@ from flask import Flask
 from flask_cors import CORS
 from app.config.database import init_db
 from app.services.rag_service import RAGService
+from app.services.search_service import SearchService
 
 
 def create_app() -> Flask:
@@ -10,6 +11,7 @@ def create_app() -> Flask:
 
     init_db()
     app.rag_service = RAGService()  # loads knowledge from DB
+    app.search_service = SearchService()  # web search service
 
     from app.controllers.conversation_controller import conversation_bp
     app.register_blueprint(conversation_bp)

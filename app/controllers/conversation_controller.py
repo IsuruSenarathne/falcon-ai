@@ -2,7 +2,7 @@ import uuid
 
 from flask import Blueprint, current_app, jsonify, request
 
-from app.dto.conversation_dto import QueryRequest
+from app.dto.conversation_dto import QueryRequest, SearchRequest
 from app.services.conversation_service import ConversationService
 
 conversation_bp = Blueprint("conversations", __name__)
@@ -20,8 +20,15 @@ def query():
         return jsonify({"error": "Missing 'question' field"}), 400
 
     try:
-        req = QueryRequest.from_json(data)
-        result = current_app.rag_service.query(req)
+        question = data["question"]
+        # Check if query contains "search" keyword
+        if "search" in question.lower():
+            req = SearchRequest.from_json(data)
+            result = current_app.search_service.search(req)
+        else:
+            req = QueryRequest.from_json(data)
+            result = current_app.rag_service.query(req)
+
         status_code = 200 if result.status == "success" else 400
         return jsonify(result.to_dict()), status_code
     except ValueError as e:
@@ -37,8 +44,17 @@ def create_conversation():
         return jsonify({"error": "Missing 'question' field"}), 400
 
     try:
-        req = QueryRequest.from_json({**data, "session_id": str(uuid.uuid4())})
-        result = current_app.rag_service.query(req)
+        question = data["question"]
+        session_data = {**data, "session_id": str(uuid.uuid4())}
+
+        # Check if query contains "search" keyword
+        if "search" in question.lower():
+            req = SearchRequest.from_json(session_data)
+            result = current_app.search_service.search(req)
+        else:
+            req = QueryRequest.from_json(session_data)
+            result = current_app.rag_service.query(req)
+
         status_code = 200 if result.status == "success" else 400
         return jsonify(result.to_dict()), status_code
     except ValueError as e:
@@ -110,8 +126,17 @@ def messages(conversation_id: str):
         return jsonify({"error": "Missing 'question' field"}), 400
 
     try:
-        req = QueryRequest.from_json({**data, "session_id": conversation_id})
-        result = current_app.rag_service.query(req)
+        question = data["question"]
+        session_data = {**data, "session_id": conversation_id}
+
+        # Check if query contains "search" keyword
+        if "search" in question.lower():
+            req = SearchRequest.from_json(session_data)
+            result = current_app.search_service.search(req)
+        else:
+            req = QueryRequest.from_json(session_data)
+            result = current_app.rag_service.query(req)
+
         status_code = 200 if result.status == "success" else 400
         return jsonify(result.to_dict()), status_code
     except ValueError as e:
