@@ -24,6 +24,10 @@ class RAGService:
 {context}
 
 Question: {question}
+
+Always respond with valid HTML using whatever tags best suit the content.
+Do NOT include diagrams, charts, or images.
+Do NOT wrap the response in <html>, <head>, <body>, <style>, or <script> tags — return inner HTML content only.
 """
         self.rag_chain = (
             {"context": vectorstore.as_retriever(), "question": RunnablePassthrough()}
