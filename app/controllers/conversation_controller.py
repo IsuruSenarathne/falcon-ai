@@ -1,3 +1,5 @@
+import uuid
+
 from flask import Blueprint, current_app, jsonify, request
 
 from app.dto.conversation_dto import QueryRequest
@@ -19,6 +21,23 @@ def query():
 
     try:
         req = QueryRequest.from_json(data)
+        result = current_app.rag_service.query(req)
+        status_code = 200 if result.status == "success" else 400
+        return jsonify(result.to_dict()), status_code
+    except ValueError as e:
+        return jsonify({"error": str(e), "status": "error"}), 400
+    except Exception as e:
+        return jsonify({"error": str(e), "status": "error"}), 500
+
+
+@conversation_bp.route("/conversations", methods=["POST"])
+def create_conversation():
+    data = request.get_json()
+    if not data or "question" not in data:
+        return jsonify({"error": "Missing 'question' field"}), 400
+
+    try:
+        req = QueryRequest.from_json({**data, "session_id": str(uuid.uuid4())})
         result = current_app.rag_service.query(req)
         status_code = 200 if result.status == "success" else 400
         return jsonify(result.to_dict()), status_code
