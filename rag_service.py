@@ -13,7 +13,7 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from database import SessionLocal
 from db_service import ConversationService
-from models import ConversationStatus
+from models import MessageStatus
 
 
 class RAGService:
@@ -91,7 +91,7 @@ Question: {question}
                 db=db,
                 question=question,
                 answer=answer,
-                status=ConversationStatus.SUCCESS,
+                status=MessageStatus.SUCCESS,
                 user_id=user_id,
                 session_id=session_id,
                 response_time=response_time
@@ -99,8 +99,8 @@ Question: {question}
             
             return {
                 "conversation_id": conversation.conversation_id,
-                "question": conversation.question,
-                "answer": conversation.answer,
+                "question": question,
+                "answer": conversation.content,
                 "status": "success",
                 "response_time": response_time,
                 "created_at": conversation.created_at.isoformat()
@@ -115,7 +115,7 @@ Question: {question}
                     db=db,
                     question=question,
                     answer=None,
-                    status=ConversationStatus.ERROR,
+                    status=MessageStatus.ERROR,
                     error=str(e),
                     user_id=user_id,
                     session_id=session_id,
@@ -169,7 +169,7 @@ Question: {question}
                         db=db,
                         question=question,
                         answer=None,
-                        status=ConversationStatus.ERROR,
+                        status=MessageStatus.ERROR,
                         error="Question cannot be empty",
                         user_id=user_id,
                         session_id=session_id,
@@ -193,7 +193,7 @@ Question: {question}
                             db=db,
                             question=question,
                             answer=answer,
-                            status=ConversationStatus.SUCCESS,
+                            status=MessageStatus.SUCCESS,
                             user_id=user_id,
                             session_id=session_id,
                             response_time=response_time
@@ -214,7 +214,7 @@ Question: {question}
                             db=db,
                             question=question,
                             answer=None,
-                            status=ConversationStatus.ERROR,
+                            status=MessageStatus.ERROR,
                             error=str(e),
                             user_id=user_id,
                             session_id=session_id,

@@ -183,6 +183,48 @@ def get_conversations():
         }), 500
 
 
+@app.route("/conversations/<conversation_id>/messages", methods=["GET", "POST"])
+def get_messages(conversation_id):
+    """
+    Fetch all messages for a specific conversation, ordered chronologically.
+
+    Response:
+    {
+        "conversation_id": "uuid",
+        "messages": [
+            {"message_id": "...", "role": "user", "content": "...", "created_at": "..."},
+            {"message_id": "...", "role": "bot",  "content": "...", "created_at": "..."}
+        ],
+        "status": "success"
+    }
+    """
+    if request.method == "GET":
+        try:
+            result = ConversationService.get_messages(conversation_id)
+            status_code = 404 if result.get("status") == "error" else 200
+            return jsonify(result), status_code
+        except Exception as e:
+            return jsonify({"error": str(e), "status": "error"}), 500
+
+    # POST — send a new message to an existing conversation
+    try:
+        data = request.get_json()
+
+        if not data or "question" not in data:
+            return jsonify({"error": "Missing 'question' field in request"}), 400
+
+        question = data["question"]
+        user_id = data.get("user_id")
+
+        result = rag_service.query(question, user_id=user_id, session_id=conversation_id)
+        return jsonify(result), 200 if result.get("status") == "success" else 400
+
+    except ValueError as e:
+        return jsonify({"error": str(e), "status": "error"}), 400
+    except Exception as e:
+        return jsonify({"error": str(e), "status": "error"}), 500
+
+
 if __name__ == "__main__":
     # Run Flask app
     # Set debug=True for development, debug=False for production

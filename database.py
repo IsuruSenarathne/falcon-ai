@@ -38,7 +38,7 @@ Base = declarative_base()
 
 # Import models to register them with Base
 # This MUST happen after Base is created but before init_db() is called
-from models import Conversation, ConversationSession  # noqa: F401, E402
+from models import Conversation, Message  # noqa: F401, E402
 
 
 def init_db():
