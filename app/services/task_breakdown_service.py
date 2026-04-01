@@ -40,7 +40,7 @@ Rules:
 
         self.classification_chain = (
             ChatPromptTemplate.from_template(classification_template)
-            | ChatOllama(model="llama3.2:1b")
+            | ChatOllama(model="qwen3:8b")
             | StrOutputParser()
         )
 
@@ -84,7 +84,7 @@ Rules:
 
         self.breakdown_chain = (
             ChatPromptTemplate.from_template(breakdown_template)
-            | ChatOllama(model="llama3.2:1b")
+            | ChatOllama(model="qwen3:8b")
             | StrOutputParser()
         )
 

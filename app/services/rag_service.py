@@ -45,7 +45,7 @@ Rules:
         self.rag_chain = (
             {"context": vectorstore.as_retriever(), "question": RunnablePassthrough()}
             | ChatPromptTemplate.from_template(template)
-            | ChatOllama(model="llama3.2:1b")
+            | ChatOllama(model="qwen3:8b")
             | StrOutputParser()
         )
 

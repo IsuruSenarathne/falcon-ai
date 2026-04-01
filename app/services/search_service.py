@@ -50,7 +50,7 @@ Rules:
 
         self.answer_chain = (
             ChatPromptTemplate.from_template(template)
-            | ChatOllama(model="llama3.2:1b")
+            | ChatOllama(model="qwen3:8b")
             | StrOutputParser()
         )
 
