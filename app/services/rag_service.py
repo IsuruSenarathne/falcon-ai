@@ -6,7 +6,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 
-from app.dto.conversation_dto import QueryRequest, QueryResponse
+from app.dto.conversation_dto import QueryRequest, QueryResponse, TaskBreakdownRequest
 from app.models.conversation import MessageStatus
 from app.repositories.knowledge_repository import KnowledgeRepository
 from app.services.conversation_service import ConversationService
@@ -14,7 +14,8 @@ from app.services.conversation_service import ConversationService
 
 class RAGService:
 
-    def __init__(self):
+    def __init__(self, task_breakdown_service=None):
+        self.task_breakdown_service = task_breakdown_service
         documents = KnowledgeRepository.load_documents()
         embeddings = OllamaEmbeddings(model="nomic-embed-text")
         vectorstore = Chroma.from_texts(texts=documents, embedding=embeddings)
@@ -70,17 +71,31 @@ Rules:
 
         return answer, reasoning
 
-    def _format_with_reasoning(self, answer: str, reasoning: str) -> str:
-        """Format answer with collapsible reasoning section."""
-        if not reasoning:
-            return answer
+    def _format_with_tasks_and_reasoning(self, answer: str, reasoning: str, tasks_html: str = "") -> str:
+        """Format answer with collapsible tasks and reasoning sections."""
+        formatted = answer
 
-        return f"""{answer}
+        if tasks_html:
+            formatted += f"""
+
+<details>
+<summary>Tasks</summary>
+{tasks_html}
+</details>"""
+
+        if reasoning:
+            formatted += f"""
 
 <details>
 <summary>Reasoning</summary>
 {reasoning}
 </details>"""
+
+        return formatted
+
+    def _format_with_reasoning(self, answer: str, reasoning: str) -> str:
+        """Format answer with collapsible reasoning section."""
+        return self._format_with_tasks_and_reasoning(answer, reasoning, "")
 
     def query(self, req: QueryRequest) -> QueryResponse:
         if not req.question or not req.question.strip():
@@ -88,13 +103,39 @@ Rules:
 
         start = time.time()
         try:
-            raw_response = self.rag_chain.invoke(req.question)
+            # Break down the question into tasks for better understanding
+            task_context = ""
+            tasks_list = []
+            tasks_html = ""
+
+            if self.task_breakdown_service:
+                try:
+                    breakdown_req = TaskBreakdownRequest(statement=req.question)
+                    breakdown = self.task_breakdown_service.breakdown(breakdown_req)
+                    if breakdown.status == "success" and breakdown.tasks:
+                        tasks_list = breakdown.tasks
+                        task_list = "\n".join([f"- {t.title}: {t.description}" for t in breakdown.tasks])
+                        task_context = f"Key tasks to address:\n{task_list}"
+                        # Format tasks as HTML for display
+                        tasks_html = "<ul>\n" + "\n".join([
+                            f"<li><strong>{t.title}</strong> ({t.priority}): {t.description}</li>"
+                            for t in breakdown.tasks
+                        ]) + "\n</ul>"
+                except Exception as e:
+                    print(f"Task breakdown failed (non-critical): {e}")
+
+            # Prepare enhanced question with task context
+            enhanced_question = req.question
+            if task_context:
+                enhanced_question = f"{req.question}\n\n{task_context}"
+
+            raw_response = self.rag_chain.invoke(enhanced_question)
             response_time = time.time() - start
 
             # Parse response into answer and reasoning
             answer, reasoning = self._parse_response(raw_response)
-            # Format answer with collapsible reasoning section
-            formatted_answer = self._format_with_reasoning(answer, reasoning)
+            # Format answer with collapsible tasks and reasoning sections
+            formatted_answer = self._format_with_tasks_and_reasoning(answer, reasoning, tasks_html)
 
             conversation_id, bot_msg = ConversationService.save_exchange(
                 question=req.question,
@@ -112,6 +153,7 @@ Rules:
                 status="success",
                 response_time=response_time,
                 created_at=bot_msg.created_at.isoformat(),
+                tasks=tasks_list if tasks_list else None,
             )
 
         except ValueError:

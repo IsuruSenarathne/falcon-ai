@@ -8,7 +8,7 @@ from langchain_ollama import ChatOllama
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
-from app.dto.conversation_dto import SearchRequest, SearchResponse
+from app.dto.conversation_dto import SearchRequest, SearchResponse, TaskBreakdownRequest
 from app.models.conversation import MessageStatus
 from app.services.conversation_service import ConversationService
 
@@ -16,7 +16,8 @@ from app.services.conversation_service import ConversationService
 class SearchService:
     """Service for web search + RAG-based answering using Brave Search API."""
 
-    def __init__(self):
+    def __init__(self, task_breakdown_service=None):
+        self.task_breakdown_service = task_breakdown_service
         self.api_key = os.getenv("BRAVE_API_KEY")
 
         if not self.api_key:
@@ -73,10 +74,31 @@ Rules:
             if not fetched_content:
                 raise ValueError("Could not fetch content from search results")
 
+            # Break down the question into tasks for better understanding
+            task_context = ""
+            tasks_list = []
+            tasks_html = ""
+            if self.task_breakdown_service:
+                try:
+                    breakdown_req = TaskBreakdownRequest(statement=req.question)
+                    breakdown = self.task_breakdown_service.breakdown(breakdown_req)
+                    if breakdown.status == "success" and breakdown.tasks:
+                        tasks_list = breakdown.tasks
+                        task_list = "\n".join([f"- {t.title}: {t.description}" for t in breakdown.tasks])
+                        task_context = f"\n\nKey tasks to address:\n{task_list}"
+                        # Format tasks as HTML for display
+                        tasks_html = "<ul>\n" + "\n".join([
+                            f"<li><strong>{t.title}</strong> ({t.priority}): {t.description}</li>"
+                            for t in breakdown.tasks
+                        ]) + "\n</ul>"
+                except Exception as e:
+                    print(f"Task breakdown failed (non-critical): {e}")
+
             # Use LLM to synthesize answer from fetched content
             combined_content = self._format_search_results(fetched_content)
+            enhanced_question = req.question + task_context
             raw_response = self.answer_chain.invoke({
-                "question": req.question,
+                "question": enhanced_question,
                 "content": combined_content
             })
 
@@ -86,7 +108,7 @@ Rules:
             from app.services.rag_service import RAGService
             rag_service = RAGService.__new__(RAGService)  # Create dummy instance for parsing
             answer, reasoning = rag_service._parse_response(raw_response)
-            formatted_answer = rag_service._format_with_reasoning(answer, reasoning)
+            formatted_answer = rag_service._format_with_tasks_and_reasoning(answer, reasoning, tasks_html)
 
             # Save to database
             conversation_id, bot_msg = ConversationService.save_exchange(
@@ -106,6 +128,7 @@ Rules:
                 response_time=response_time,
                 created_at=bot_msg.created_at.isoformat(),
                 sources=[r.get("link") for r in fetched_content],
+                tasks=tasks_list if tasks_list else None,
             )
 
         except ValueError:

@@ -44,6 +44,19 @@ class MessageDTO:
 
 
 @dataclass
+class TaskItem:
+    """Represents a single task in a breakdown"""
+    id: int
+    title: str
+    description: str
+    priority: str  # "high", "medium", "low"
+    estimated_effort: str  # "quick", "medium", "complex"
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class QueryResponse:
     conversation_id: str
     question: str
@@ -51,10 +64,14 @@ class QueryResponse:
     status: str
     response_time: float
     created_at: str
+    tasks: Optional[List[TaskItem]] = None
     error: Optional[str] = None
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        if self.tasks:
+            data['tasks'] = [t.to_dict() if hasattr(t, 'to_dict') else asdict(t) for t in self.tasks]
+        return data
 
 
 @dataclass
@@ -66,10 +83,14 @@ class SearchResponse:
     response_time: float
     created_at: str
     sources: List[str]
+    tasks: Optional[List[TaskItem]] = None
     error: Optional[str] = None
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        if self.tasks:
+            data['tasks'] = [t.to_dict() if hasattr(t, 'to_dict') else asdict(t) for t in self.tasks]
+        return data
 
 
 @dataclass
@@ -120,6 +141,36 @@ class MessagesResponse:
     conversation_id: str
     messages: List[MessageDTO]
     status: str = "success"
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class TaskBreakdownRequest:
+    """Request to break down a user statement into tasks"""
+    statement: str
+    user_id: Optional[str] = None
+    session_id: Optional[str] = None
+
+    @staticmethod
+    def from_json(data: dict) -> "TaskBreakdownRequest":
+        return TaskBreakdownRequest(
+            statement=data["statement"],
+            user_id=data.get("user_id"),
+            session_id=data.get("session_id"),
+        )
+
+
+@dataclass
+class TaskBreakdownResponse:
+    """Response containing breakdown of tasks"""
+    statement: str
+    summary: str
+    tasks: List[TaskItem]
+    total_tasks: int
+    status: str
+    error: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
