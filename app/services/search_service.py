@@ -30,15 +30,21 @@ Question: {question}
 Search Results:
 {content}
 
-Provide a comprehensive answer using ONLY information from the search results above.
-Format your answer in HTML.
+Respond with your answer in HTML, then a blank line, then the line "---REASONING---", then your reasoning.
 
-Respond in two sections:
-ANSWER:
-<p>Your answer here...</p>
+Do NOT include brackets, labels, or placeholder text. Just the actual content.
 
-REASONING:
-<p>Your reasoning here...</p>
+Example format:
+<p>Your answer here</p>
+
+---REASONING---
+Your reasoning here
+
+Rules:
+- Use valid HTML tags for formatting
+- Use ONLY information from the search results
+- Explain how you derived your answer from the results
+- Inner HTML only (no <html>, <head>, <body>, <style>, <script> tags)
 """
 
         self.answer_chain = (
@@ -199,12 +205,12 @@ REASONING:
         return fetched
 
     def _fetch_url_content(self, url: str) -> Optional[str]:
-        """Fetch and extract text content from a URL."""
+        """Fetch and extract text content from a URL. Skip slow/forbidden sites."""
         try:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             }
-            response = requests.get(url, headers=headers, timeout=10)
+            response = requests.get(url, headers=headers, timeout=5)  # Reduced timeout to 5s
             response.raise_for_status()
 
             soup = BeautifulSoup(response.content, "html.parser")
@@ -222,8 +228,21 @@ REASONING:
 
             return text if text else None
 
+        except requests.exceptions.Timeout:
+            print(f"⏱ Timeout fetching {url}, skipping...")
+            return None
+        except requests.exceptions.ConnectionError:
+            print(f"🔌 Connection error for {url}, skipping...")
+            return None
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 403:
+                print(f"🚫 Forbidden (403) for {url}, skipping...")
+            else:
+                print(f"❌ HTTP {e.response.status_code} for {url}, skipping...")
+            return None
         except Exception as e:
-            raise Exception(f"Failed to fetch {url}: {str(e)}")
+            print(f"⚠ Error fetching {url}: {str(e)}")
+            return None
 
     def _format_search_results(self, fetched: List[dict]) -> str:
         """Format fetched content for LLM context."""
