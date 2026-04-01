@@ -25,21 +25,21 @@ class RAGService:
 
 Question: {question}
 
-Respond in two sections:
-1. ANSWER: Provide a clear, direct answer in valid HTML.
-2. REASONING: Explain your reasoning and how you derived the answer from the context.
+Respond with your answer in HTML, then a blank line, then the line "---REASONING---", then your reasoning.
 
-Format your response exactly like this:
-ANSWER:
-<p>Your answer here...</p>
+Do NOT include brackets, labels, or placeholder text. Just the actual content.
 
-REASONING:
-<p>Your reasoning here...</p>
+Example format:
+<p>Your answer here</p>
+
+---REASONING---
+Your reasoning here
 
 Rules:
-- Always respond with valid HTML using whatever tags best suit the content.
-- Do NOT include diagrams, charts, or images.
-- Do NOT wrap the response in <html>, <head>, <body>, <style>, or <script> tags — return inner HTML content only.
+- Use valid HTML tags for formatting
+- Explain how you derived the answer from the context
+- Do NOT include diagrams, charts, or images
+- Inner HTML only (no <html>, <head>, <body>, <style>, <script> tags)
 """
         self.rag_chain = (
             {"context": vectorstore.as_retriever(), "question": RunnablePassthrough()}
@@ -53,15 +53,18 @@ Rules:
         answer = ""
         reasoning = ""
 
-        if "ANSWER:" in raw_response and "REASONING:" in raw_response:
+        # Parse by ---REASONING--- separator
+        if "---REASONING---" in raw_response:
+            parts = raw_response.split("---REASONING---")
+            answer = parts[0].strip()
+            reasoning = parts[1].strip() if len(parts) > 1 else ""
+        elif "REASONING:" in raw_response:
+            # Fallback for old ANSWER:/REASONING: format
             parts = raw_response.split("REASONING:")
-            answer_part = parts[0].replace("ANSWER:", "").strip()
-            reasoning_part = parts[1].strip() if len(parts) > 1 else ""
-
-            answer = answer_part
-            reasoning = reasoning_part
+            answer = parts[0].replace("ANSWER:", "").strip()
+            reasoning = parts[1].strip() if len(parts) > 1 else ""
         else:
-            # Fallback if parsing fails
+            # Last resort fallback
             answer = raw_response.strip()
             reasoning = ""
 
