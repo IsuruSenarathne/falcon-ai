@@ -3,16 +3,19 @@ from langchain_community.vectorstores import Chroma
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
-from app.dto.conversation_dto import QueryRequest, QueryResponse
+from app.dto.conversation_dto import QueryRequest, QueryResponse, SearchRequest
 from app.models.conversation import MessageStatus
 from app.repositories.knowledge_repository import KnowledgeRepository
 from app.services.conversation_service import ConversationService
+from app.services.search_service import SearchService
 
 
 class RAGService:
 
-    def __init__(self, thinking_service=None):
-        self.thinking_service = thinking_service
+    def __init__(self, task_breakdown_service=None):
+        self.task_breakdown_service = task_breakdown_service
+        self.search_service = SearchService(task_breakdown_service=task_breakdown_service)
+        
         documents = KnowledgeRepository.load_documents()
         embeddings = OllamaEmbeddings(model="nomic-embed-text")
         self.vectorstore = Chroma.from_texts(texts=documents, embedding=embeddings)
@@ -140,8 +143,18 @@ Rules:
             print(f"💡 Using LLM knowledge (no additional context)")
 
         if context_type == "web_search":
-            print(f"🔍 Web search selected (not implemented yet)")
+            try:
+                search_results = self.search_service._brave_search(question)
+                if search_results:
+                    fetched_content = self.search_service._fetch_content_from_links(search_results[:5])
+                    if fetched_content:
+                        formatted = self.search_service._format_search_results(fetched_content)
+                        context_parts.append(formatted)
+                        print(f"🌐 Web search → {len(fetched_content)} sources retrieved")
+            except Exception as e:
+                print(f"⚠ Web search failed (falling back to LLM): {e}")
 
+        print(f"Final context: {context_parts}")
         context = "\n".join(context_parts)
         return context
 
@@ -218,24 +231,17 @@ Rules:
         print(f"\nStarting RAG Query for: {req.question[:50]}...")
 
         try:
-            # 1. Think about the question
-            thinking_result = None
-            if self.thinking_service:
-                thinking_result = self.thinking_service.think(req.question)
-                print(f"User asking: {thinking_result.what_user_asking}")
-                print(f"Plan: {thinking_result.plan}")
-
-            # 2. Retrieve context based on frontend-specified type
+            # 1. Retrieve context based on frontend-specified type
             print(f"Context type: {req.context_type}")
             context = self._retrieve_context(req.question, req.context_type)
 
-            # 3. Invoke LLM with appropriate template
+            # 2. Invoke LLM with appropriate template
             raw_response = self._invoke_llm(req.question, context)
 
-            # 4. Parse response
+            # 3. Parse response
             answer, reasoning = self._parse_response(raw_response)
 
-            # 5. Process success and save to database
+            # 4. Process success and save to database
             return self._process_success(req, answer, reasoning)
 
         except ValueError:
