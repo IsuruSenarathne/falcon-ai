@@ -50,7 +50,7 @@ Rules:
 
         self.answer_chain = (
             ChatPromptTemplate.from_template(template)
-            | ChatOllama(model="qwen3:8b")
+            | ChatOllama(model="qwen2.5:1.5b")
             | StrOutputParser()
         )
 
@@ -63,14 +63,24 @@ Rules:
             raise ValueError("Search not configured. Set BRAVE_API_KEY environment variable.")
 
         start = time.time()
+        print(f"\n🌐 Starting Search Query for: {req.question[:50]}...")
+
         try:
             # Search using Brave
+            search_start = time.time()
             search_results = self._brave_search(req.question)
+            search_time = time.time() - search_start
+            print(f"🔍 Brave search API: {search_time:.2f}s")
+
             if not search_results:
                 raise ValueError("No search results found")
 
             # Fetch content from top 5 links
+            fetch_start = time.time()
             fetched_content = self._fetch_content_from_links(search_results[:5])
+            fetch_time = time.time() - fetch_start
+            print(f"📥 Fetching content: {fetch_time:.2f}s")
+
             if not fetched_content:
                 raise ValueError("Could not fetch content from search results")
 
@@ -80,8 +90,11 @@ Rules:
             tasks_html = ""
             if self.task_breakdown_service:
                 try:
+                    breakdown_start = time.time()
                     breakdown_req = TaskBreakdownRequest(statement=req.question)
                     breakdown = self.task_breakdown_service.breakdown(breakdown_req)
+                    breakdown_time = time.time() - breakdown_start
+                    print(f"📊 Task breakdown: {breakdown_time:.2f}s")
                     if breakdown.status == "success" and breakdown.tasks:
                         tasks_list = breakdown.tasks
                         task_list = "\n".join([f"- {t.title}: {t.description}" for t in breakdown.tasks])
@@ -97,20 +110,27 @@ Rules:
             # Use LLM to synthesize answer from fetched content
             combined_content = self._format_search_results(fetched_content)
             enhanced_question = req.question + task_context
+
+            chain_start = time.time()
             raw_response = self.answer_chain.invoke({
                 "question": enhanced_question,
                 "content": combined_content
             })
-
-            response_time = time.time() - start
+            chain_time = time.time() - chain_start
+            print(f"🤖 LLM Response time: {chain_time:.2f}s")
 
             # Parse response into answer and reasoning
+            parse_start = time.time()
             from app.services.rag_service import RAGService
             rag_service = RAGService.__new__(RAGService)  # Create dummy instance for parsing
             answer, reasoning = rag_service._parse_response(raw_response)
             formatted_answer = rag_service._format_with_tasks_and_reasoning(answer, reasoning, tasks_html)
+            parse_time = time.time() - parse_start
+            print(f"📝 Parsing time: {parse_time:.2f}s")
 
             # Save to database
+            db_start = time.time()
+            response_time = time.time() - start
             conversation_id, bot_msg = ConversationService.save_exchange(
                 question=req.question,
                 answer=formatted_answer,
@@ -119,6 +139,9 @@ Rules:
                 session_id=req.session_id,
                 response_time=response_time,
             )
+            db_time = time.time() - db_start
+            print(f"💾 Database save: {db_time:.2f}s")
+            print(f"✅ Total Search time: {response_time:.2f}s\n")
 
             return SearchResponse(
                 conversation_id=conversation_id,

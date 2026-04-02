@@ -3,7 +3,7 @@ from app import create_app
 import langchain
 
 # Enable LangChain debugging to see LLM logs and thinking
-langchain.debug = True
+# langchain.debug = True
 
 load_dotenv()
 

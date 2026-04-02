@@ -7,6 +7,7 @@ class QueryRequest:
     question: str
     user_id: Optional[str] = None
     session_id: Optional[str] = None
+    context_type: str = "default"  # "default", "web_search", "datasource"
 
     @staticmethod
     def from_json(data: dict) -> "QueryRequest":
@@ -14,6 +15,7 @@ class QueryRequest:
             question=data["question"],
             user_id=data.get("user_id"),
             session_id=data.get("session_id"),
+            context_type=data.get("context_type", "default"),
         )
 
 
