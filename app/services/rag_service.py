@@ -1,3 +1,5 @@
+import time
+
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_core.output_parsers import StrOutputParser
@@ -8,6 +10,7 @@ from app.dto.conversation_dto import QueryRequest, QueryResponse
 from app.models.conversation import MessageStatus
 from app.repositories.knowledge_repository import KnowledgeRepository
 from app.services.conversation_service import ConversationService
+from app.services.planning_service import PlanningService
 from app.services.search_service import SearchService
 
 
@@ -16,6 +19,7 @@ class RAGService:
     def __init__(self, task_breakdown_service=None):
         self.task_breakdown_service = task_breakdown_service
         self.search_service = SearchService()
+        self.planning_service = PlanningService()
         
         documents = KnowledgeRepository.load_documents()
         embeddings = OllamaEmbeddings(model=EMBEDDING_MODEL)
@@ -29,6 +33,11 @@ class RAGService:
 {conversation_context}
 
 Question: {question}
+
+Instructions:
+- If the question asks for a list, comparison, or "find me..." → provide a COMPREHENSIVE list with all relevant options from the context
+- If listing items → use <ul><li> format with details for each item
+- Be thorough and include all relevant information available in the context
 
 Respond with your answer in HTML, then a blank line, then the line "---REASONING---", then your reasoning.
 
@@ -53,6 +62,11 @@ Rules:
 {conversation_context}
 
 Question: {question}
+
+Instructions:
+- If the question asks for a list, comparison, or "find me..." → provide a COMPREHENSIVE list with all relevant options you know about
+- If listing items → use <ul><li> format with details for each item
+- Be thorough and include all relevant information you have
 
 Respond with your answer in HTML, then a blank line, then the line "---REASONING---", then your reasoning.
 
@@ -139,23 +153,27 @@ Rules:
         context_parts = []
 
         if context_type == "datasource":
-            docs = self.vectorstore.similarity_search(question, k=3)
+            print(f"      → Searching datasource...")
+            ds_start = time.time()
+            docs = self.vectorstore.similarity_search(question, k=5)
             if docs:
                 context_parts.append("\n".join([doc.page_content for doc in docs]))
-            print(f"📚 Datasource retrieval → {len(docs)} documents")
+            ds_time = time.time() - ds_start
+            print(f"        ✓ Datasource: {len(docs)} documents in {ds_time:.2f}s")
 
         if context_type == "default":
-            print(f"💡 Using LLM knowledge (no additional context)")
+            print(f"      → Using LLM knowledge (no additional context)")
 
         if context_type == "web_search":
             try:
+                print(f"      → Running web search...")
                 fetched_content = self.search_service.search(question)
                 if fetched_content:
                     formatted = self.search_service.format_results(fetched_content)
                     context_parts.append(formatted)
-                    print(f"🌐 Web search → {len(fetched_content)} sources retrieved")
+                    print(f"        ✓ Web search: {len(fetched_content)} sources retrieved")
             except Exception as e:
-                print(f"⚠ Web search failed (falling back to LLM): {e}")
+                print(f"        ⚠ Web search failed, falling back to LLM: {str(e)[:50]}")
 
         context = "\n".join(context_parts)
         return context
@@ -175,30 +193,36 @@ Rules:
 
     def _invoke_llm(self, question: str, context: str = "", conversation_history: list = None) -> str:
         """Invoke LLM chain with appropriate template."""
+        print(f"      → Formatting conversation context...")
         conversation_context = self._format_conversation_context(conversation_history)
 
         if context:
+            print(f"      → Building KB template chain ({len(context)} chars context)...")
             chain = (
                 ChatPromptTemplate.from_template(self.kb_template)
                 | self.llm
                 | StrOutputParser()
             )
+            print(f"      → Invoking LLM with context...")
             raw_response = chain.invoke({
                 "context": context,
                 "conversation_context": conversation_context,
                 "question": question
             })
         else:
+            print(f"      → Building general knowledge template chain...")
             chain = (
                 ChatPromptTemplate.from_template(self.general_template)
                 | self.llm
                 | StrOutputParser()
             )
+            print(f"      → Invoking LLM without context...")
             raw_response = chain.invoke({
                 "conversation_context": conversation_context,
                 "question": question
             })
 
+        print(f"        ✓ LLM returned response ({len(raw_response)} chars)")
         return raw_response
 
     def _process_success(self, req: QueryRequest, answer: str, reasoning: str) -> QueryResponse:
@@ -222,6 +246,71 @@ Rules:
             response_time=0,
             created_at=bot_msg.created_at.isoformat(),
         )
+
+    def _execute_step(self, step_question: str, context_type: str, conversation_history: list = None) -> str:
+        """Execute a single planning step and return the answer."""
+        try:
+            print(f"      → Executing: {step_question[:50]}...")
+
+            # Retrieve context for this step
+            context = self._retrieve_context(step_question, context_type)
+
+            # Invoke LLM for this step
+            raw_response = self._invoke_llm(step_question, context, conversation_history)
+
+            # Parse response
+            answer, _ = self._parse_response(raw_response)
+            print(f"        ✓ Step answer: {len(answer)} chars")
+
+            return answer
+        except Exception as e:
+            print(f"        ⚠ Step failed: {str(e)}")
+            return f"Could not answer: {str(e)}"
+
+    def _synthesize_answers(self, original_question: str, step_answers: list, synthesis_instruction: str, conversation_history: list = None) -> tuple:
+        """Combine multiple step answers into final answer."""
+        print(f"  → Synthesizing {len(step_answers)} step answers...")
+
+        # Build synthesis prompt
+        synthesis_prompt = f"""You have the following information gathered from multiple searches:
+
+{chr(10).join([f'Step {i+1} Answer:{chr(10)}{answer}{chr(10)}' for i, answer in enumerate(step_answers)])}
+
+Original Question: {original_question}
+
+Synthesis Instructions: {synthesis_instruction}
+
+Now provide a comprehensive final answer that combines all this information.
+
+Respond with your answer in HTML, then a blank line, then the line "---REASONING---", then your reasoning.
+
+Do NOT include brackets, labels, or placeholder text. Just the actual content.
+
+Rules:
+- Use valid HTML tags for formatting
+- Create a comprehensive, well-organized answer
+- Use <ul><li> for lists, <table> for comparisons if helpful
+- Inner HTML only (no <html>, <head>, <body>, <style>, <script> tags)
+"""
+
+        try:
+            synthesis_start = time.time()
+            chain = (
+                ChatPromptTemplate.from_template(synthesis_prompt)
+                | self.llm
+                | StrOutputParser()
+            )
+            raw_response = chain.invoke({})
+            synthesis_time = time.time() - synthesis_start
+            print(f"  ⏱️  Synthesis: {synthesis_time:.2f}s")
+
+            answer, reasoning = self._parse_response(raw_response)
+            return answer, reasoning
+        except Exception as e:
+            print(f"  ⚠ Synthesis failed: {str(e)}")
+            # Fallback: concatenate answers
+            combined = "<br>".join([f"<h3>Part {i+1}</h3>{answer}" for i, answer in enumerate(step_answers)])
+            return combined, "Combined multiple step answers"
 
     def _process_error(self, req: QueryRequest, error: str) -> QueryResponse:
         """Process failed query and save error to database."""
@@ -249,12 +338,17 @@ Rules:
         if not req.question or not req.question.strip():
             raise ValueError("Question cannot be empty")
 
-        print(f"\nStarting RAG Query for: {req.question[:50]}...")
+        start_time = time.time()
+        print(f"\n{'='*60}")
+        print(f"📚 RAGService.query() starting for: {req.question[:50]}...")
+        print(f"{'='*60}")
 
         try:
             # 1. Fetch conversation history if this is a follow-up question
             conversation_history = None
             if req.session_id:
+                hist_start = time.time()
+                print(f"  → Fetching conversation history...")
                 from app.config.database import SessionLocal
                 from app.repositories.conversation_repository import ConversationRepository
                 db = SessionLocal()
@@ -268,23 +362,73 @@ Rules:
                             }
                             for msg in sorted(conv.messages, key=lambda m: m.created_at)
                         ]
+                        print(f"    ✓ Found {len(conversation_history)} previous messages")
                 finally:
                     db.close()
+                hist_time = time.time() - hist_start
+                print(f"  ⏱️  History fetch: {hist_time:.2f}s")
 
-            # 2. Retrieve context based on frontend-specified type
-            print(f"Context type: {req.context_type}")
-            context = self._retrieve_context(req.question, req.context_type)
+            # 2. Check if question is complex and needs planning
+            plan_start = time.time()
+            print(f"  → Analyzing question complexity...")
+            plan = self.planning_service.analyze(req.question)
+            plan_time = time.time() - plan_start
+            print(f"  ⏱️  Planning phase: {plan_time:.2f}s")
 
-            # 3. Invoke LLM with conversation history
-            raw_response = self._invoke_llm(req.question, context, conversation_history)
+            # 3. Execute based on complexity
+            if plan.is_complex:
+                print(f"  📋 MULTI-STEP EXECUTION ({len(plan.steps)} steps):")
+                step_answers = []
 
-            # 4. Parse response
-            answer, reasoning = self._parse_response(raw_response)
+                for step in plan.steps:
+                    print(f"\n    [Step {step.step_number}] {step.description}")
+                    answer = self._execute_step(step.question, req.context_type, conversation_history)
+                    step_answers.append(answer)
 
-            # 5. Process success and save to database
-            return self._process_success(req, answer, reasoning)
+                # Synthesize all answers
+                print(f"\n  → Synthesizing final answer from {len(step_answers)} steps...")
+                answer, reasoning = self._synthesize_answers(
+                    req.question,
+                    step_answers,
+                    plan.synthesis_instruction,
+                    conversation_history
+                )
+            else:
+                print(f"  ℹ️  Single-step execution")
+
+                # Standard single-step flow
+                context_start = time.time()
+                print(f"  → Retrieving context (type: {req.context_type})...")
+                context = self._retrieve_context(req.question, req.context_type)
+                context_time = time.time() - context_start
+                print(f"  ⏱️  Context retrieval: {context_time:.2f}s ({len(context)} chars)")
+
+                # Invoke LLM with conversation history
+                llm_start = time.time()
+                print(f"  → Invoking LLM...")
+                raw_response = self._invoke_llm(req.question, context, conversation_history)
+                llm_time = time.time() - llm_start
+                print(f"  ⏱️  LLM response: {llm_time:.2f}s")
+
+                # Parse response
+                answer, reasoning = self._parse_response(raw_response)
+                print(f"    ✓ Parsed answer ({len(answer)} chars) + reasoning ({len(reasoning)} chars)")
+
+            # 4. Process success and save to database
+            db_start = time.time()
+            result = self._process_success(req, answer, reasoning)
+            db_time = time.time() - db_start
+            print(f"Database save: {db_time:.2f}s")
+
+            total_time = time.time() - start_time
+            print(f"RAGService completed in {total_time:.2f}s")
+            print(f"{'='*60}\n")
+
+            return result
 
         except ValueError:
             raise
         except Exception as e:
+            print(f"Error: {str(e)}")
+            print(f"{'='*60}\n")
             return self._process_error(req, str(e))
