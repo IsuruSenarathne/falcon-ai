@@ -3,6 +3,7 @@ from langchain_community.vectorstores import Chroma
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
+from app.constants.models import LLM_MAIN_MODEL, EMBEDDING_MODEL
 from app.dto.conversation_dto import QueryRequest, QueryResponse, SearchRequest
 from app.models.conversation import MessageStatus
 from app.repositories.knowledge_repository import KnowledgeRepository
@@ -17,13 +18,15 @@ class RAGService:
         self.search_service = SearchService(task_breakdown_service=task_breakdown_service)
         
         documents = KnowledgeRepository.load_documents()
-        embeddings = OllamaEmbeddings(model="nomic-embed-text")
+        embeddings = OllamaEmbeddings(model=EMBEDDING_MODEL)
         self.vectorstore = Chroma.from_texts(texts=documents, embedding=embeddings)
         print(f"✓ Knowledge base loaded: {len(documents)} documents from database")
 
         # Template for knowledge base context
         self.kb_template = """Answer the question based ONLY on the following context:
 {context}
+
+{conversation_context}
 
 Question: {question}
 
@@ -47,6 +50,8 @@ Rules:
         # Template for general knowledge (no context)
         self.general_template = """Answer the following question using your knowledge:
 
+{conversation_context}
+
 Question: {question}
 
 Respond with your answer in HTML, then a blank line, then the line "---REASONING---", then your reasoning.
@@ -66,7 +71,7 @@ Rules:
 - Inner HTML only (no <html>, <head>, <body>, <style>, <script> tags)
 """
 
-        self.llm = ChatOllama(model="qwen2.5:1.5b")
+        self.llm = ChatOllama(model=LLM_MAIN_MODEL)
 
     def _parse_response(self, raw_response: str) -> tuple[str, str]:
         """Parse raw response into answer and reasoning sections."""
@@ -158,8 +163,23 @@ Rules:
         context = "\n".join(context_parts)
         return context
 
-    def _invoke_llm(self, question: str, context: str = "") -> str:
+    def _format_conversation_context(self, conversation_history: list = None) -> str:
+        """Format conversation history for LLM context."""
+        if not conversation_history:
+            return ""
+
+        history_text = "Previous conversation:\n"
+        for msg in conversation_history[-5:]:  # Last 5 messages for context
+            role = msg.get("role", "unknown").upper()
+            content = msg.get("content", "")
+            history_text += f"{role}: {content}\n"
+
+        return history_text
+
+    def _invoke_llm(self, question: str, context: str = "", conversation_history: list = None) -> str:
         """Invoke LLM chain with appropriate template."""
+        conversation_context = self._format_conversation_context(conversation_history)
+
         if context:
             chain = (
                 ChatPromptTemplate.from_template(self.kb_template)
@@ -168,6 +188,7 @@ Rules:
             )
             raw_response = chain.invoke({
                 "context": context,
+                "conversation_context": conversation_context,
                 "question": question
             })
         else:
@@ -176,7 +197,10 @@ Rules:
                 | self.llm
                 | StrOutputParser()
             )
-            raw_response = chain.invoke({"question": question})
+            raw_response = chain.invoke({
+                "conversation_context": conversation_context,
+                "question": question
+            })
 
         return raw_response
 
@@ -231,17 +255,36 @@ Rules:
         print(f"\nStarting RAG Query for: {req.question[:50]}...")
 
         try:
-            # 1. Retrieve context based on frontend-specified type
+            # 1. Fetch conversation history if this is a follow-up question
+            conversation_history = None
+            if req.session_id:
+                from app.config.database import SessionLocal
+                from app.repositories.conversation_repository import ConversationRepository
+                db = SessionLocal()
+                try:
+                    conv = ConversationRepository.find_by_id(db, req.session_id)
+                    if conv:
+                        conversation_history = [
+                            {
+                                "role": msg.role.value,
+                                "content": msg.content
+                            }
+                            for msg in sorted(conv.messages, key=lambda m: m.created_at)
+                        ]
+                finally:
+                    db.close()
+
+            # 2. Retrieve context based on frontend-specified type
             print(f"Context type: {req.context_type}")
             context = self._retrieve_context(req.question, req.context_type)
 
-            # 2. Invoke LLM with appropriate template
-            raw_response = self._invoke_llm(req.question, context)
+            # 3. Invoke LLM with conversation history
+            raw_response = self._invoke_llm(req.question, context, conversation_history)
 
-            # 3. Parse response
+            # 4. Parse response
             answer, reasoning = self._parse_response(raw_response)
 
-            # 4. Process success and save to database
+            # 5. Process success and save to database
             return self._process_success(req, answer, reasoning)
 
         except ValueError:

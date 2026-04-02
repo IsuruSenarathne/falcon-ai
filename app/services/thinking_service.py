@@ -6,6 +6,8 @@ from langchain_ollama import ChatOllama
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
+from app.constants.models import LLM_MAIN_MODEL
+
 
 @dataclass
 class ThinkingResult:
@@ -36,7 +38,7 @@ Return ONLY valid JSON with this structure:
 
         self.chain = (
             ChatPromptTemplate.from_template(template)
-            | ChatOllama(model="qwen2.5:1.5b")
+            | ChatOllama(model=LLM_MAIN_MODEL)
             | JsonOutputParser()
         )
 
@@ -64,7 +66,7 @@ Rules:
 
         self.context_chain = (
             ChatPromptTemplate.from_template(context_template)
-            | ChatOllama(model="qwen2.5:1.5b")
+            | ChatOllama(model=LLM_MAIN_MODEL)
             | JsonOutputParser()
         )
 

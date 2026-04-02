@@ -8,6 +8,7 @@ class QueryRequest:
     user_id: Optional[str] = None
     session_id: Optional[str] = None
     context_type: str = "default"  # "default", "web_search", "datasource"
+    conversation_history: Optional[List] = None  # Previous messages in conversation
 
     @staticmethod
     def from_json(data: dict) -> "QueryRequest":
@@ -16,6 +17,7 @@ class QueryRequest:
             user_id=data.get("user_id"),
             session_id=data.get("session_id"),
             context_type=data.get("context_type", "default"),
+            conversation_history=None,  # Will be set by controller
         )
 
 

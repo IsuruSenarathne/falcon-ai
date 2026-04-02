@@ -8,6 +8,7 @@ from langchain_ollama import ChatOllama
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
+from app.constants.models import LLM_LIGHT_MODEL
 from app.dto.conversation_dto import SearchRequest, SearchResponse, TaskBreakdownRequest
 from app.models.conversation import MessageStatus
 from app.services.conversation_service import ConversationService
@@ -50,7 +51,7 @@ Rules:
 
         self.answer_chain = (
             ChatPromptTemplate.from_template(template)
-            | ChatOllama(model="qwen2.5:1.5b")
+            | ChatOllama(model=LLM_LIGHT_MODEL)
             | StrOutputParser()
         )
 
