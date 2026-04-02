@@ -13,7 +13,7 @@ def create_app() -> Flask:
     init_db()
     app.task_breakdown_service = TaskBreakdownService()  # breaks down user requests into tasks
     app.rag_service = RAGService(task_breakdown_service=app.task_breakdown_service)  # loads knowledge from DB
-    app.search_service = SearchService(task_breakdown_service=app.task_breakdown_service)  # web search service
+    app.search_service = SearchService()  # web search service
 
     from app.controllers.conversation_controller import conversation_bp
     app.register_blueprint(conversation_bp)

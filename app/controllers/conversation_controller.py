@@ -2,7 +2,7 @@ import uuid
 
 from flask import Blueprint, current_app, jsonify, request
 
-from app.dto.conversation_dto import QueryRequest, SearchRequest
+from app.dto.conversation_dto import QueryRequest
 from app.services.conversation_service import ConversationService
 
 conversation_bp = Blueprint("conversations", __name__)
@@ -23,66 +23,11 @@ def query():
         return jsonify({"error": "Missing 'question' field"}), 400
 
     try:
-        question = data["question"]
-        print(f"\n{'='*60}")
-        print(f"📨 REQUEST: {question}")
-        print(f"{'='*60}")
-
-        # Step 1: Analyze the question (classification)
-        think_start = time.time()
-        from app.dto.conversation_dto import TaskBreakdownRequest
-        breakdown_req = TaskBreakdownRequest(question=question, user_id=data.get("user_id"))
-        breakdown = current_app.task_breakdown_service.breakdown(breakdown_req)
-        think_time = time.time() - think_start
-        print(f"🧠 Analysis phase: {think_time:.2f}s")
-
-        # Step 2: Think about which source to use
-        if breakdown.status == "success":
-            routing_start = time.time()
-            routing = current_app.thinking_service.think(
-                statement=question,
-                input_type=breakdown.summary[:50] if hasattr(breakdown, 'summary') else "unknown",
-                category="general",
-                intent=question[:100]
-            )
-            routing_time = time.time() - routing_start
-            print(f"🛣️  Routing decision: {routing_time:.2f}s (source: {routing.primary_source})")
-
-            # Step 3: Route to appropriate service
-            if routing.primary_source == "search":
-                req = SearchRequest.from_json(data)
-                result = current_app.search_service.search(req)
-            else:
-                # Use RAG (knowledge_base or general_knowledge will both use RAG)
-                req = QueryRequest.from_json(data)
-                result = current_app.rag_service.query(req)
-        else:
-            # Fallback: check for "search" keyword
-            if "search" in question.lower():
-                req = SearchRequest.from_json(data)
-                result = current_app.search_service.search(req)
-            else:
-                req = QueryRequest.from_json(data)
-                result = current_app.rag_service.query(req)
+        req = QueryRequest.from_json(data)
+        result = current_app.rag_service.query(req)
 
         total_time = time.time() - request_start
-        print(f"\n⏱️  TOTAL RESPONSE TIME: {total_time:.2f}s")
-
-        # Performance diagnostics
-        if total_time > 30:
-            print(f"\n⚠️  PERFORMANCE ANALYSIS:")
-            print(f"   Current: {total_time:.2f}s")
-            print(f"   Recommendations:")
-            print(f"   1. Model Speed: Qwen3 8B is slower than 1B models")
-            print(f"      → Try: ollama pull qwen2:1.5b (faster)")
-            print(f"   2. Skip task breakdown for short queries")
-            print(f"      → Automatically skips for <4 word questions")
-            print(f"   3. Reduce retrieved context size")
-            print(f"      → Fewer/shorter documents = faster LLM processing")
-            print(f"   4. Enable caching for similar queries")
-            print(f"   5. Run task breakdown asynchronously")
-
-        print(f"{'='*60}\n")
+        print(f"⏱️  TOTAL RESPONSE TIME: {total_time:.2f}s\n")
 
         status_code = 200 if result.status == "success" else 400
         return jsonify(result.to_dict()), status_code
@@ -99,16 +44,9 @@ def create_conversation():
         return jsonify({"error": "Missing 'question' field"}), 400
 
     try:
-        question = data["question"]
         session_data = {**data, "session_id": str(uuid.uuid4())}
-
-        # Check if query contains "search" keyword
-        if "search" in question.lower():
-            req = SearchRequest.from_json(session_data)
-            result = current_app.search_service.search(req)
-        else:
-            req = QueryRequest.from_json(session_data)
-            result = current_app.rag_service.query(req)
+        req = QueryRequest.from_json(session_data)
+        result = current_app.rag_service.query(req)
 
         status_code = 200 if result.status == "success" else 400
         return jsonify(result.to_dict()), status_code
@@ -181,16 +119,9 @@ def messages(conversation_id: str):
         return jsonify({"error": "Missing 'question' field"}), 400
 
     try:
-        question = data["question"]
         session_data = {**data, "session_id": conversation_id}
-
-        # Check if query contains "search" keyword
-        if "search" in question.lower():
-            req = SearchRequest.from_json(session_data)
-            result = current_app.search_service.search(req)
-        else:
-            req = QueryRequest.from_json(session_data)
-            result = current_app.rag_service.query(req)
+        req = QueryRequest.from_json(session_data)
+        result = current_app.rag_service.query(req)
 
         status_code = 200 if result.status == "success" else 400
         return jsonify(result.to_dict()), status_code

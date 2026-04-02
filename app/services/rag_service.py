@@ -4,7 +4,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.constants.models import LLM_MAIN_MODEL, EMBEDDING_MODEL
-from app.dto.conversation_dto import QueryRequest, QueryResponse, SearchRequest
+from app.dto.conversation_dto import QueryRequest, QueryResponse
 from app.models.conversation import MessageStatus
 from app.repositories.knowledge_repository import KnowledgeRepository
 from app.services.conversation_service import ConversationService
@@ -15,7 +15,7 @@ class RAGService:
 
     def __init__(self, task_breakdown_service=None):
         self.task_breakdown_service = task_breakdown_service
-        self.search_service = SearchService(task_breakdown_service=task_breakdown_service)
+        self.search_service = SearchService()
         
         documents = KnowledgeRepository.load_documents()
         embeddings = OllamaEmbeddings(model=EMBEDDING_MODEL)
@@ -149,17 +149,14 @@ Rules:
 
         if context_type == "web_search":
             try:
-                search_results = self.search_service._brave_search(question)
-                if search_results:
-                    fetched_content = self.search_service._fetch_content_from_links(search_results[:5])
-                    if fetched_content:
-                        formatted = self.search_service._format_search_results(fetched_content)
-                        context_parts.append(formatted)
-                        print(f"🌐 Web search → {len(fetched_content)} sources retrieved")
+                fetched_content = self.search_service.search(question)
+                if fetched_content:
+                    formatted = self.search_service.format_results(fetched_content)
+                    context_parts.append(formatted)
+                    print(f"🌐 Web search → {len(fetched_content)} sources retrieved")
             except Exception as e:
                 print(f"⚠ Web search failed (falling back to LLM): {e}")
 
-        print(f"Final context: {context_parts}")
         context = "\n".join(context_parts)
         return context
 
