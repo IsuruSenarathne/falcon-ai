@@ -196,6 +196,37 @@ Rules:
         print(f"      → Formatting conversation context...")
         conversation_context = self._format_conversation_context(conversation_history)
 
+        # Print full context before sending to LLM
+        print(f"\n{'='*60}")
+        print(f"📋 FULL CONTEXT BEING SENT TO LLM:")
+        print(f"{'='*60}")
+
+        if conversation_context:
+            print(f"\n🔹 CONVERSATION CONTEXT:")
+            print(f"{'-'*60}")
+            print(conversation_context)
+            print(f"{'-'*60}\n")
+
+        if context:
+            print(f"🔹 RETRIEVED CONTEXT ({len(context)} chars):")
+            print(f"{'-'*60}")
+            # Print first 1000 chars to avoid too much output
+            context_preview = context[:1000] + "..." if len(context) > 1000 else context
+            print(context_preview)
+            print(f"{'-'*60}\n")
+
+        print(f"🔹 QUESTION:")
+        print(f"{'-'*60}")
+        print(question)
+        print(f"{'-'*60}\n")
+
+        print(f"🔹 TEMPLATE BEING USED:")
+        if context:
+            print(f"Knowledge Base Template (with context)")
+        else:
+            print(f"General Knowledge Template (no context)")
+        print(f"{'='*60}\n")
+
         if context:
             print(f"      → Building KB template chain ({len(context)} chars context)...")
             chain = (

@@ -23,17 +23,30 @@ def query():
         return jsonify({"error": "Missing 'question' field"}), 400
 
     try:
+        question = data.get("question", "")
+        context_type = data.get("context_type", "default")
+        user_id = data.get("user_id", "anonymous")
+
+        print(f"\n{'='*60}")
+        print(f"📥 POST /query from {user_id}")
+        print(f"   Question: {question[:50]}...")
+        print(f"   Context type: {context_type}")
+        print(f"{'='*60}")
+
         req = QueryRequest.from_json(data)
         result = current_app.rag_service.query(req)
 
         total_time = time.time() - request_start
-        print(f"⏱️  TOTAL RESPONSE TIME: {total_time:.2f}s\n")
+        status_emoji = "✅" if result.status == "success" else "❌"
+        print(f"{status_emoji} TOTAL RESPONSE TIME: {total_time:.2f}s\n")
 
         status_code = 200 if result.status == "success" else 400
         return jsonify(result.to_dict()), status_code
     except ValueError as e:
+        print(f"❌ Validation error: {str(e)}\n")
         return jsonify({"error": str(e), "status": "error"}), 400
     except Exception as e:
+        print(f"❌ Error: {str(e)}\n")
         return jsonify({"error": str(e), "status": "error"}), 500
 
 
