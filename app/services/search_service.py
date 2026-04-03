@@ -42,7 +42,6 @@ class SearchService:
         Returns:
             List of dicts with keys: title, link, content, snippet
         """
-        start = time.time()
         print(f"\n{'='*60}")
         print(f"🔍 SearchService.search() starting for: {query[:50]}...")
         print(f"{'='*60}")
@@ -54,25 +53,18 @@ class SearchService:
             raise ValueError("Search not configured. Set BRAVE_API_KEY environment variable.")
 
         # Search using Brave
-        search_start = time.time()
         search_results = self._brave_search(query, num_results)
-        search_time = time.time() - search_start
-        print(f"⏱️  Brave API call: {search_time:.2f}s")
 
         if not search_results:
             raise ValueError("No search results found")
 
         # Fetch content from top results
-        fetch_start = time.time()
         fetched_content = self._fetch_content_from_links(search_results)
-        fetch_time = time.time() - fetch_start
-        print(f"⏱️  Content fetching: {fetch_time:.2f}s")
 
         if not fetched_content:
             raise ValueError("Could not fetch content from search results")
 
-        total_time = time.time() - start
-        print(f"✅ SearchService completed in {total_time:.2f}s")
+        print(f"✅ SearchService completed")
         print(f"{'='*60}\n")
 
         return fetched_content

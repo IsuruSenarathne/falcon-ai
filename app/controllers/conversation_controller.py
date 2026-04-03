@@ -15,9 +15,6 @@ def health():
 
 @conversation_bp.route("/query", methods=["POST"])
 def query():
-    import time
-    request_start = time.time()
-
     data = request.get_json()
     if not data or "question" not in data:
         return jsonify({"error": "Missing 'question' field"}), 400
@@ -36,9 +33,8 @@ def query():
         req = QueryRequest.from_json(data)
         result = current_app.rag_service.query(req)
 
-        total_time = time.time() - request_start
         status_emoji = "✅" if result.status == "success" else "❌"
-        print(f"{status_emoji} TOTAL RESPONSE TIME: {total_time:.2f}s\n")
+        print(f"{status_emoji} Query completed\n")
 
         status_code = 200 if result.status == "success" else 400
         return jsonify(result.to_dict()), status_code

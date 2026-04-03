@@ -1,5 +1,3 @@
-import time
-
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_core.output_parsers import StrOutputParser
@@ -154,12 +152,10 @@ Rules:
 
         if context_type == "datasource":
             print(f"      → Searching datasource...")
-            ds_start = time.time()
             docs = self.vectorstore.similarity_search(question, k=5)
             if docs:
                 context_parts.append("\n".join([doc.page_content for doc in docs]))
-            ds_time = time.time() - ds_start
-            print(f"        ✓ Datasource: {len(docs)} documents in {ds_time:.2f}s")
+            print(f"        ✓ Datasource: {len(docs)} documents")
 
         if context_type == "default":
             print(f"      → Using LLM knowledge (no additional context)")
@@ -325,15 +321,13 @@ Rules:
 """
 
         try:
-            synthesis_start = time.time()
             chain = (
                 ChatPromptTemplate.from_template(synthesis_prompt)
                 | self.llm
                 | StrOutputParser()
             )
             raw_response = chain.invoke({})
-            synthesis_time = time.time() - synthesis_start
-            print(f"  ⏱️  Synthesis: {synthesis_time:.2f}s")
+            print(f"  ✓ Synthesis complete")
 
             answer, reasoning = self._parse_response(raw_response)
             return answer, reasoning
@@ -369,7 +363,6 @@ Rules:
         if not req.question or not req.question.strip():
             raise ValueError("Question cannot be empty")
 
-        start_time = time.time()
         print(f"\n{'='*60}")
         print(f"📚 RAGService.query() starting for: {req.question[:50]}...")
         print(f"{'='*60}")
@@ -378,7 +371,6 @@ Rules:
             # 1. Fetch conversation history if this is a follow-up question
             conversation_history = None
             if req.session_id:
-                hist_start = time.time()
                 print(f"  → Fetching conversation history...")
                 from app.config.database import SessionLocal
                 from app.repositories.conversation_repository import ConversationRepository
@@ -396,15 +388,10 @@ Rules:
                         print(f"    ✓ Found {len(conversation_history)} previous messages")
                 finally:
                     db.close()
-                hist_time = time.time() - hist_start
-                print(f"  ⏱️  History fetch: {hist_time:.2f}s")
 
             # 2. Check if question is complex and needs planning
-            plan_start = time.time()
             print(f"  → Analyzing question complexity...")
             plan = self.planning_service.analyze(req.question)
-            plan_time = time.time() - plan_start
-            print(f"  ⏱️  Planning phase: {plan_time:.2f}s")
 
             # Override context_type if explicitly specified in request (not default)
             if req.context_type != "default":
@@ -439,36 +426,27 @@ Rules:
                 # Only retrieve context if planning decided it's needed
                 context = ""
                 if plan.needs_context:
-                    context_start = time.time()
                     # Use context_type from planning, not from request
                     print(f"  → Retrieving context (type: {plan.context_type})...")
                     context = self._retrieve_context(req.question, plan.context_type)
-                    context_time = time.time() - context_start
-                    print(f"  ⏱️  Context retrieval: {context_time:.2f}s ({len(context)} chars)")
+                    print(f"  ✓ Context retrieved ({len(context)} chars)")
                 else:
                     print(f"  → Skipping context retrieval (planning determined context not needed)")
 
                 # Invoke LLM with conversation history
                 # Only pass conversation history if context is needed (to avoid biasing LLM)
-                llm_start = time.time()
                 print(f"  → Invoking LLM...")
                 history_for_llm = conversation_history if plan.needs_context else None
                 raw_response = self._invoke_llm(req.question, context, history_for_llm)
-                llm_time = time.time() - llm_start
-                print(f"  ⏱️  LLM response: {llm_time:.2f}s")
+                print(f"  ✓ LLM response received")
 
                 # Parse response
                 answer, reasoning = self._parse_response(raw_response)
                 print(f"    ✓ Parsed answer ({len(answer)} chars) + reasoning ({len(reasoning)} chars)")
 
             # 4. Process success and save to database
-            db_start = time.time()
             result = self._process_success(req, answer, reasoning)
-            db_time = time.time() - db_start
-            print(f"Database save: {db_time:.2f}s")
-
-            total_time = time.time() - start_time
-            print(f"RAGService completed in {total_time:.2f}s")
+            print(f"✓ RAGService completed")
             print(f"{'='*60}\n")
 
             return result

@@ -1,6 +1,5 @@
 import json
 import re
-import time
 from typing import List
 
 from langchain_ollama import ChatOllama
@@ -64,22 +63,17 @@ Rules:
         if not req.statement or not req.statement.strip():
             raise ValueError("Statement cannot be empty")
 
-        start_time = time.time()
-
         try:
             # Single LLM call for classification + breakdown
-            llm_start = time.time()
             raw_response = self.combined_chain.invoke({"statement": req.statement})
-            llm_time = time.time() - llm_start
-            print(f"⏱ Classification + Breakdown (1 LLM call): {llm_time:.2f}s")
+            print(f"✓ Classification + Breakdown complete")
 
             # Parse all sections
             intent = self._extract_section(raw_response, "INTENT")
             summary = self._extract_section(raw_response, "SUMMARY")
             tasks = self._parse_tasks(self._extract_section(raw_response, "TASKS"))
 
-            total_time = time.time() - start_time
-            print(f"✅ Task Breakdown Total: {total_time:.2f}s\n")
+            print(f"✅ Task Breakdown completed\n")
 
             return TaskBreakdownResponse(
                 statement=req.statement,

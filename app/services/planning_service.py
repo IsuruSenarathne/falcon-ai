@@ -1,5 +1,4 @@
 import json
-import time
 from dataclasses import dataclass
 from typing import List
 
@@ -96,16 +95,13 @@ Return ONLY valid JSON with no other text:
 
     def analyze(self, question: str) -> Plan:
         """Analyze question and create plan if needed."""
-        start = time.time()
         print(f"\n  🧠 PlanningService.analyze() starting...")
 
         try:
             # Step 1: Check complexity
             print(f"    → Detecting complexity...")
-            complexity_start = time.time()
             complexity_result = self.complexity_chain.invoke({"question": question})
-            complexity_time = time.time() - complexity_start
-            print(f"      ✓ Complexity detection: {complexity_time:.2f}s")
+            print(f"      ✓ Complexity detection complete")
 
             is_complex = complexity_result.get("is_complex", False)
             needs_context = complexity_result.get("needs_context", True)
@@ -118,10 +114,8 @@ Return ONLY valid JSON with no other text:
             # Step 2: If complex, create plan
             if is_complex:
                 print(f"    → Creating execution plan...")
-                planning_start = time.time()
                 planning_result = self.planning_chain.invoke({"question": question})
-                planning_time = time.time() - planning_start
-                print(f"      ✓ Plan created: {planning_time:.2f}s")
+                print(f"      ✓ Plan created")
 
                 steps_data = planning_result.get("steps", [])
                 steps = [
@@ -157,9 +151,7 @@ Return ONLY valid JSON with no other text:
                     context_type=context_type
                 )
 
-            total_time = time.time() - start
-            print(f"  ✅ Planning completed in {total_time:.2f}s\n")
-            print(f"plan: {plan}")
+            print(f"  ✅ Planning completed\n")
             return plan
 
         except Exception as e:
