@@ -286,7 +286,7 @@ Rules:
             # Retrieve context for this step
             context = self._retrieve_context(step_question, context_type)
 
-            # Invoke LLM for this step
+            # Invoke LLM for this step (history already filtered in query() method)
             raw_response = self._invoke_llm(step_question, context, conversation_history)
 
             # Parse response
@@ -298,7 +298,7 @@ Rules:
             print(f"        ⚠ Step failed: {str(e)}")
             return f"Could not answer: {str(e)}"
 
-    def _synthesize_answers(self, original_question: str, step_answers: list, synthesis_instruction: str, conversation_history: list = None) -> tuple:
+    def _synthesize_answers(self, original_question: str, step_answers: list, synthesis_instruction: str) -> tuple:
         """Combine multiple step answers into final answer."""
         print(f"  → Synthesizing {len(step_answers)} step answers...")
 
@@ -406,6 +406,12 @@ Rules:
             plan_time = time.time() - plan_start
             print(f"  ⏱️  Planning phase: {plan_time:.2f}s")
 
+            # Override context_type if explicitly specified in request (not default)
+            if req.context_type != "default":
+                print(f"  → Using explicit context_type from request: {req.context_type}")
+                plan.context_type = req.context_type
+                plan.needs_context = True  # If user explicitly asks for a context type, they need it
+
             # 3. Execute based on complexity
             if plan.is_complex:
                 print(f"  📋 MULTI-STEP EXECUTION ({len(plan.steps)} steps):")
@@ -413,7 +419,10 @@ Rules:
 
                 for step in plan.steps:
                     print(f"\n    [Step {step.step_number}] {step.description}")
-                    answer = self._execute_step(step.question, req.context_type, conversation_history)
+                    # Use plan's context_type decision for steps
+                    # Only pass conversation history if context is needed
+                    history_for_step = conversation_history if plan.needs_context else None
+                    answer = self._execute_step(step.question, plan.context_type if plan.needs_context else "default", history_for_step)
                     step_answers.append(answer)
 
                 # Synthesize all answers
@@ -421,23 +430,30 @@ Rules:
                 answer, reasoning = self._synthesize_answers(
                     req.question,
                     step_answers,
-                    plan.synthesis_instruction,
-                    conversation_history
+                    plan.synthesis_instruction
                 )
             else:
                 print(f"  ℹ️  Single-step execution")
 
                 # Standard single-step flow
-                context_start = time.time()
-                print(f"  → Retrieving context (type: {req.context_type})...")
-                context = self._retrieve_context(req.question, req.context_type)
-                context_time = time.time() - context_start
-                print(f"  ⏱️  Context retrieval: {context_time:.2f}s ({len(context)} chars)")
+                # Only retrieve context if planning decided it's needed
+                context = ""
+                if plan.needs_context:
+                    context_start = time.time()
+                    # Use context_type from planning, not from request
+                    print(f"  → Retrieving context (type: {plan.context_type})...")
+                    context = self._retrieve_context(req.question, plan.context_type)
+                    context_time = time.time() - context_start
+                    print(f"  ⏱️  Context retrieval: {context_time:.2f}s ({len(context)} chars)")
+                else:
+                    print(f"  → Skipping context retrieval (planning determined context not needed)")
 
                 # Invoke LLM with conversation history
+                # Only pass conversation history if context is needed (to avoid biasing LLM)
                 llm_start = time.time()
                 print(f"  → Invoking LLM...")
-                raw_response = self._invoke_llm(req.question, context, conversation_history)
+                history_for_llm = conversation_history if plan.needs_context else None
+                raw_response = self._invoke_llm(req.question, context, history_for_llm)
                 llm_time = time.time() - llm_start
                 print(f"  ⏱️  LLM response: {llm_time:.2f}s")
 

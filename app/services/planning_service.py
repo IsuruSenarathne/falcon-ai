@@ -25,6 +25,8 @@ class Plan:
     original_question: str
     steps: List[PlanStep]
     synthesis_instruction: str
+    needs_context: bool = True  # Whether context is needed for this query
+    context_type: str = "default"  # Which context type: "datasource", "web_search", or "default" (LLM knowledge)
 
 
 class PlanningService:
@@ -32,7 +34,10 @@ class PlanningService:
 
     def __init__(self):
         # Complexity detection template
-        complexity_template = """Analyze this question and determine if it's complex (requires multiple steps to answer).
+        complexity_template = """Analyze this question and determine:
+1. If it's complex (requires multiple steps to answer)
+2. If it needs external context/knowledge to answer
+3. What type of context: "datasource" (internal knowledge base), "web_search" (web), or "default" (LLM's own knowledge)
 
 Question: {question}
 
@@ -42,9 +47,16 @@ A complex question typically:
 - Requires combining information from different domains
 - Asks for filtering/ranking across multiple dimensions
 
+Context needed for:
+- "datasource": Questions about specific topics in internal knowledge base (courses, advisors, departments, etc.)
+- "web_search": Questions requiring current/real-world information (latest prices, current events, recent data)
+- "default": Greetings, general knowledge, or conversational queries that need no external context
+
 Return ONLY valid JSON with no other text:
 {{
     "is_complex": true|false,
+    "needs_context": true|false,
+    "context_type": "datasource"|"web_search"|"default",
     "reason": "brief explanation"
 }}"""
 
@@ -96,8 +108,12 @@ Return ONLY valid JSON with no other text:
             print(f"      ✓ Complexity detection: {complexity_time:.2f}s")
 
             is_complex = complexity_result.get("is_complex", False)
+            needs_context = complexity_result.get("needs_context", True)
+            context_type = complexity_result.get("context_type", "default")
             reason = complexity_result.get("reason", "")
-            print(f"      Is complex: {is_complex} ({reason})")
+            print(f"      Is complex: {is_complex}")
+            print(f"      Needs context: {needs_context} (type: {context_type})")
+            print(f"      Reason: {reason}")
 
             # Step 2: If complex, create plan
             if is_complex:
@@ -126,7 +142,9 @@ Return ONLY valid JSON with no other text:
                     is_complex=True,
                     original_question=question,
                     steps=steps,
-                    synthesis_instruction=synthesis
+                    synthesis_instruction=synthesis,
+                    needs_context=needs_context,
+                    context_type=context_type
                 )
             else:
                 # Simple question, no steps needed
@@ -134,20 +152,24 @@ Return ONLY valid JSON with no other text:
                     is_complex=False,
                     original_question=question,
                     steps=[],
-                    synthesis_instruction=""
+                    synthesis_instruction="",
+                    needs_context=needs_context,
+                    context_type=context_type
                 )
 
             total_time = time.time() - start
             print(f"  ✅ Planning completed in {total_time:.2f}s\n")
-
+            print(f"plan: {plan}")
             return plan
 
         except Exception as e:
             print(f"  ❌ Planning failed: {str(e)}")
-            # Return non-complex plan as fallback
+            # Return non-complex plan as fallback with no context
             return Plan(
                 is_complex=False,
                 original_question=question,
                 steps=[],
-                synthesis_instruction=""
+                synthesis_instruction="",
+                needs_context=False,
+                context_type="default"
             )
