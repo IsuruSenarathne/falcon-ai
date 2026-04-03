@@ -233,6 +233,24 @@ class ConversationService:
             db.close()
 
     @staticmethod
+    def get_conversation_history(conversation_id: str) -> list:
+        """Get conversation history as a list of message dicts with role and content."""
+        db = SessionLocal()
+        try:
+            conv = ConversationRepository.find_by_id(db, conversation_id)
+            if not conv:
+                return []
+            return [
+                {
+                    "role": msg.role.value,
+                    "content": msg.content
+                }
+                for msg in sorted(conv.messages, key=lambda m: m.created_at)
+            ]
+        finally:
+            db.close()
+
+    @staticmethod
     def get_messages(conversation_id: str) -> Optional[MessagesResponse]:
         db = SessionLocal()
         try:

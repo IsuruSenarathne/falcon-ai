@@ -8,8 +8,8 @@ from app.dto.conversation_dto import QueryRequest, QueryResponse
 from app.models.conversation import MessageStatus
 from app.repositories.knowledge_repository import KnowledgeRepository
 from app.services.conversation_service import ConversationService
-from app.services.planning_service import PlanningService
 from app.services.search_service import SearchService
+from app.services.planning_service import PlanningService
 
 
 class RAGService:
@@ -18,7 +18,7 @@ class RAGService:
         self.task_breakdown_service = task_breakdown_service
         self.search_service = SearchService()
         self.planning_service = PlanningService()
-        
+
         documents = KnowledgeRepository.load_documents()
         embeddings = OllamaEmbeddings(model=EMBEDDING_MODEL)
         self.vectorstore = Chroma.from_texts(texts=documents, embedding=embeddings)
@@ -165,9 +165,21 @@ Rules:
                 print(f"      → Running web search...")
                 fetched_content = self.search_service.search(question)
                 if fetched_content:
-                    formatted = self.search_service.format_results(fetched_content)
-                    context_parts.append(formatted)
-                    print(f"        ✓ Web search: {len(fetched_content)} sources retrieved")
+                    # RAG on web search results: embed and retrieve only relevant chunks
+                    print(f"      → Creating vectorstore from {len(fetched_content)} sources...")
+                    web_texts = [f"[{item['title']}]\n{item['content']}" for item in fetched_content]
+                    web_vectorstore = Chroma.from_texts(
+                        texts=web_texts,
+                        embedding=OllamaEmbeddings(model=EMBEDDING_MODEL)
+                    )
+
+                    # Retrieve most relevant chunks from web search results
+                    web_docs = web_vectorstore.similarity_search(question, k=5)
+                    if web_docs:
+                        context_parts.append("\n".join([doc.page_content for doc in web_docs]))
+                        print(f"        ✓ Web search RAG: {len(web_docs)} relevant chunks retrieved from {len(fetched_content)} sources")
+                    else:
+                        print(f"        ⚠ No relevant chunks found in web search results")
             except Exception as e:
                 print(f"        ⚠ Web search failed, falling back to LLM: {str(e)[:50]}")
 
@@ -274,69 +286,6 @@ Rules:
             created_at=bot_msg.created_at.isoformat(),
         )
 
-    def _execute_step(self, step_question: str, context_type: str, conversation_history: list = None) -> str:
-        """Execute a single planning step and return the answer."""
-        try:
-            print(f"      → Executing: {step_question[:50]}...")
-
-            # Retrieve context for this step
-            context = self._retrieve_context(step_question, context_type)
-
-            # Invoke LLM for this step (history already filtered in query() method)
-            raw_response = self._invoke_llm(step_question, context, conversation_history)
-
-            # Parse response
-            answer, _ = self._parse_response(raw_response)
-            print(f"        ✓ Step answer: {len(answer)} chars")
-
-            return answer
-        except Exception as e:
-            print(f"        ⚠ Step failed: {str(e)}")
-            return f"Could not answer: {str(e)}"
-
-    def _synthesize_answers(self, original_question: str, step_answers: list, synthesis_instruction: str) -> tuple:
-        """Combine multiple step answers into final answer."""
-        print(f"  → Synthesizing {len(step_answers)} step answers...")
-
-        # Build synthesis prompt
-        synthesis_prompt = f"""You have the following information gathered from multiple searches:
-
-{chr(10).join([f'Step {i+1} Answer:{chr(10)}{answer}{chr(10)}' for i, answer in enumerate(step_answers)])}
-
-Original Question: {original_question}
-
-Synthesis Instructions: {synthesis_instruction}
-
-Now provide a comprehensive final answer that combines all this information.
-
-Respond with your answer in HTML, then a blank line, then the line "---REASONING---", then your reasoning.
-
-Do NOT include brackets, labels, or placeholder text. Just the actual content.
-
-Rules:
-- Use valid HTML tags for formatting
-- Create a comprehensive, well-organized answer
-- Use <ul><li> for lists, <table> for comparisons if helpful
-- Inner HTML only (no <html>, <head>, <body>, <style>, <script> tags)
-"""
-
-        try:
-            chain = (
-                ChatPromptTemplate.from_template(synthesis_prompt)
-                | self.llm
-                | StrOutputParser()
-            )
-            raw_response = chain.invoke({})
-            print(f"  ✓ Synthesis complete")
-
-            answer, reasoning = self._parse_response(raw_response)
-            return answer, reasoning
-        except Exception as e:
-            print(f"  ⚠ Synthesis failed: {str(e)}")
-            # Fallback: concatenate answers
-            combined = "<br>".join([f"<h3>Part {i+1}</h3>{answer}" for i, answer in enumerate(step_answers)])
-            return combined, "Combined multiple step answers"
-
     def _process_error(self, req: QueryRequest, error: str) -> QueryResponse:
         """Process failed query and save error to database."""
         conversation_id, _ = ConversationService.save_exchange(
@@ -359,6 +308,60 @@ Rules:
             error=error,
         )
 
+    def _execute_plan_step(self, step_question: str, context_type: str) -> str:
+        """Execute a single step of a plan by retrieving context and getting LLM response."""
+        print(f"      → Executing: {step_question[:50]}...")
+        context = self._retrieve_context(step_question, context_type)
+        step_response = self._invoke_llm(step_question, context, None)
+        answer, _ = self._parse_response(step_response)
+        print(f"        ✓ Step answer ({len(answer)} chars)")
+        return answer
+
+    def _synthesize_plan(self, original_question: str, plan_answers: list, synthesis_instruction: str, conversation_history: list = None) -> str:
+        """Synthesize answers from plan steps into final response."""
+        print(f"    → Synthesizing plan answers...")
+
+        # Format plan answers for context
+        synthesis_context = "Step Results:\n"
+        for i, answer in enumerate(plan_answers, 1):
+            synthesis_context += f"\nStep {i} Answer:\n{answer}\n"
+
+        synthesis_context += f"\nSynthesis Instruction: {synthesis_instruction}"
+
+        # Create synthesis prompt
+        synthesis_template = """Based on the following step results and synthesis instruction, provide a comprehensive final answer to the original question:
+
+Original Question: {question}
+
+{step_results}
+
+{conversation_context}
+
+Respond with your answer in HTML, then a blank line, then the line "---REASONING---", then your reasoning.
+
+Example format:
+<p>Your synthesized answer here</p>
+
+---REASONING---
+Your reasoning here"""
+
+        conversation_context = self._format_conversation_context(conversation_history)
+
+        chain = (
+            ChatPromptTemplate.from_template(synthesis_template)
+            | self.llm
+            | StrOutputParser()
+        )
+
+        raw_response = chain.invoke({
+            "question": original_question,
+            "step_results": synthesis_context,
+            "conversation_context": conversation_context
+        })
+
+        print(f"      ✓ Synthesis complete")
+        return raw_response
+
     def query(self, req: QueryRequest) -> QueryResponse:
         if not req.question or not req.question.strip():
             raise ValueError("Question cannot be empty")
@@ -368,83 +371,68 @@ Rules:
         print(f"{'='*60}")
 
         try:
+            # 0. Analyze question with planning
+            print(f"  → Analyzing question with planning...")
+            plan = self.planning_service.analyze(req.question)
+            print(f"    ✓ Plan created (complex: {plan.is_complex}, context: {plan.context_type})")
+
             # 1. Fetch conversation history if this is a follow-up question
             conversation_history = None
             if req.session_id:
                 print(f"  → Fetching conversation history...")
-                from app.config.database import SessionLocal
-                from app.repositories.conversation_repository import ConversationRepository
-                db = SessionLocal()
-                try:
-                    conv = ConversationRepository.find_by_id(db, req.session_id)
-                    if conv:
-                        conversation_history = [
-                            {
-                                "role": msg.role.value,
-                                "content": msg.content
-                            }
-                            for msg in sorted(conv.messages, key=lambda m: m.created_at)
-                        ]
-                        print(f"    ✓ Found {len(conversation_history)} previous messages")
-                finally:
-                    db.close()
+                conversation_history = ConversationService.get_conversation_history(req.session_id)
+                if conversation_history:
+                    print(f"    ✓ Found {len(conversation_history)} previous messages")
 
-            # 2. Check if question is complex and needs planning
-            print(f"  → Analyzing question complexity...")
-            plan = self.planning_service.analyze(req.question)
-
-            # Override context_type if explicitly specified in request (not default)
+            # 2. Determine context type (override: request > plan > default)
             if req.context_type != "default":
-                print(f"  → Using explicit context_type from request: {req.context_type}")
-                plan.context_type = req.context_type
-                plan.needs_context = True  # If user explicitly asks for a context type, they need it
+                context_type = req.context_type
+                print(f"  → Using context type from request: {context_type}")
+            else:
+                context_type = plan.context_type if plan.needs_context else "default"
+                print(f"  → Using context type from plan: {context_type}")
 
-            # 3. Execute based on complexity
+            # 3. Execute plan or simple query
+            raw_response = ""
             if plan.is_complex:
-                print(f"  📋 MULTI-STEP EXECUTION ({len(plan.steps)} steps):")
+                print(f"  → Executing complex query plan ({len(plan.steps)} steps)...")
+
+                # Execute each step
                 step_answers = []
-
                 for step in plan.steps:
-                    print(f"\n    [Step {step.step_number}] {step.description}")
-                    # Use plan's context_type decision for steps
-                    # Only pass conversation history if context is needed
-                    history_for_step = conversation_history if plan.needs_context else None
-                    answer = self._execute_step(step.question, plan.context_type if plan.needs_context else "default", history_for_step)
-                    step_answers.append(answer)
+                    step_answer = self._execute_plan_step(step.question, context_type)
+                    step_answers.append(step_answer)
 
-                # Synthesize all answers
-                print(f"\n  → Synthesizing final answer from {len(step_answers)} steps...")
-                answer, reasoning = self._synthesize_answers(
+                # Synthesize answers
+                raw_response = self._synthesize_plan(
                     req.question,
                     step_answers,
-                    plan.synthesis_instruction
+                    plan.synthesis_instruction,
+                    conversation_history
                 )
             else:
-                print(f"  ℹ️  Single-step execution")
+                print(f"  → Executing simple query (no planning needed)...")
 
-                # Standard single-step flow
-                # Only retrieve context if planning decided it's needed
+                # 3a. Retrieve context
                 context = ""
-                if plan.needs_context:
-                    # Use context_type from planning, not from request
-                    print(f"  → Retrieving context (type: {plan.context_type})...")
-                    context = self._retrieve_context(req.question, plan.context_type)
-                    print(f"  ✓ Context retrieved ({len(context)} chars)")
+                if context_type != "default":
+                    print(f"    → Retrieving context (type: {context_type})...")
+                    context = self._retrieve_context(req.question, context_type)
+                    print(f"    ✓ Context retrieved ({len(context)} chars)")
                 else:
-                    print(f"  → Skipping context retrieval (planning determined context not needed)")
+                    print(f"    → Using LLM knowledge (no additional context)")
 
-                # Invoke LLM with conversation history
-                # Only pass conversation history if context is needed (to avoid biasing LLM)
-                print(f"  → Invoking LLM...")
-                history_for_llm = conversation_history if plan.needs_context else None
-                raw_response = self._invoke_llm(req.question, context, history_for_llm)
-                print(f"  ✓ LLM response received")
+                # 3b. Make SINGLE LLM call with question + context
+                print(f"    → Invoking LLM...")
+                raw_response = self._invoke_llm(req.question, context, conversation_history)
 
-                # Parse response
-                answer, reasoning = self._parse_response(raw_response)
-                print(f"    ✓ Parsed answer ({len(answer)} chars) + reasoning ({len(reasoning)} chars)")
+            print(f"  ✓ LLM response received")
 
-            # 4. Process success and save to database
+            # 4. Parse response
+            answer, reasoning = self._parse_response(raw_response)
+            print(f"    ✓ Parsed answer ({len(answer)} chars)")
+
+            # 5. Process success and save to database
             result = self._process_success(req, answer, reasoning)
             print(f"✓ RAGService completed")
             print(f"{'='*60}\n")
