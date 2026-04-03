@@ -3,6 +3,8 @@ from document_loader import DocumentLoader
 from vector_store_service import VectorStoreService
 from llm_chain_service import LLMChainService
 from response_formatter import ResponseFormatter
+from search_service import SearchService
+from search_retriever import SearchRetriever
 import config
 
 
@@ -18,6 +20,10 @@ class RAGApplication:
             embeddings_model=config.EMBEDDINGS_MODEL,
             retrieval_k=config.RETRIEVAL_K
         )
+
+        # Initialize search service
+        self.search_service = SearchService()
+
         self.llm_chain = LLMChainService(
             model=config.LLM_MODEL,
             prompt_template=config.SYSTEM_PROMPT,
@@ -33,7 +39,12 @@ class RAGApplication:
 
     def query(self, question: str) -> str:
         """Execute a single RAG query."""
-        retriever = self.vector_store.get_retriever()
+        # Use web search if "websearch" keyword is in the question
+        if "websearch" in question.lower():
+            retriever = SearchRetriever(search_service=self.search_service)
+        else:
+            retriever = self.vector_store.get_retriever()
+
         context = retriever.invoke(question)
         response = self.llm_chain.invoke(question, context)
         return response

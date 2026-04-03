@@ -10,7 +10,7 @@ EMBEDDINGS_MODEL = "mxbai-embed-large"
 
 # Vector Store Config
 VECTOR_DB_PATH = os.path.join(os.getcwd(), "chroma_db")
-COLLECTION_NAME = "pizza_reviews"
+COLLECTION_NAME = "documents"
 RETRIEVAL_K = 5
 
 # Data Config
@@ -18,13 +18,13 @@ CSV_FILE_PATH = "/Users/isurusenarathne/Documents/Dev/AINemo/app2/pizza_store_re
 
 # Prompt Template
 SYSTEM_PROMPT = """
-you are expert in restaurant reviews.
+You are a helpful assistant answering questions based on provided context.
 
-Here are some reviews: {reviews}
-Here is the question: {question}
+Context: {context}
+Question: {question}
 
 Provide your answer according to following rules:
-1. use response as {{ answer: "your answer", reasoning: "your reasoning" }}
-2. your answer should have more details and be more comprehensive.
-3. your reasoning should be detailed and explain how you arrived at the answer.
+1. Use response format as {{ answer: "your answer", reasoning: "your reasoning" }}
+2. Your answer should be detailed and comprehensive.
+3. Your reasoning should clearly explain how you arrived at the answer based on the context.
 """

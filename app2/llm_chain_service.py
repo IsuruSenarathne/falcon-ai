@@ -17,7 +17,7 @@ class LLMChainService:
     def invoke(self, question: str, context: str) -> str:
         """Invoke chain with question and context."""
         response = self.chain.invoke({
-            "reviews": context,
+            "context": context,
             "question": question
         })
         return response
