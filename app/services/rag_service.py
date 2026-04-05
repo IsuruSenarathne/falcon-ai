@@ -1,5 +1,4 @@
 """Simplified RAG service using app2 architecture."""
-import logging
 import time
 from langchain_core.documents import Document
 from app.services.vector_store_service import VectorStoreService
@@ -54,15 +53,23 @@ class RAGService:
 
     def _get_prompt_template(self) -> str:
         """Get the prompt template for LLM."""
-        return """You are a helpful assistant answering questions based on provided context.
+        return """You are a helpful assistant. CRITICAL INSTRUCTIONS:
 
-Context: {context}
+1. **USE ONLY THE PROVIDED CONTEXT**: Answer based EXCLUSIVELY on the context provided below.
+2. **IGNORE TRAINING DATA**: Do NOT use your training knowledge if it contradicts the provided context.
+3. **CONTEXT IS AUTHORITATIVE**: If the context contains information, that is the source of truth.
+4. **IF NOT IN CONTEXT**: If the answer is not in the provided context, explicitly state: "This information is not available in the provided context."
+
+Context:
+{context}
+
 Question: {question}
 
-Provide your answer according to following rules:
-1. Use response format as {{ answer: "your answer", reasoning: "your reasoning" }}
-2. Your answer should be detailed and comprehensive.
-3. Your reasoning should clearly explain how you arrived at the answer based on the context.
+Provide your answer in this format:
+---ANSWER---
+[Your detailed answer based ONLY on the provided context]
+---REASONING---
+[Explain how the answer comes from the provided context, cite specific parts if relevant]
 """
 
     @log_service_call(logger)
@@ -93,6 +100,10 @@ Provide your answer according to following rules:
             context = self._format_context(context_docs)
             logger.info(f"Context retrieved | characters={len(str(context))}")
 
+            # Log context availability for debugging
+            if not context or len(context.strip()) < 10:
+                logger.warning("Minimal context retrieved - LLM may fall back to training data")
+
             # Write context to latest_context.txt (overwrites previous)
             conv_id = req.session_id or req.conversation_id or "unknown"
             write_context_to_file(
@@ -109,6 +120,9 @@ Provide your answer according to following rules:
             logger.debug("Step 2: Generating response with LLM...")
             response = self.llm_chain.invoke(req.question, context)
             logger.debug("LLM response generated")
+
+            # Validate response uses context
+            self._validate_context_usage(context, response, req.question)
 
             # Parse and save
             answer, reasoning = self._parse_response(response)
@@ -132,16 +146,44 @@ Provide your answer according to following rules:
         else:
             return docs.page_content if hasattr(docs, 'page_content') else str(docs)
 
+    def _validate_context_usage(self, context: str, response: str, question: str) -> bool:
+        """Validate that response appears to use the provided context.
+
+        Returns True if response seems context-grounded, False if it may be using training data.
+        """
+        # Check if response explicitly states context insufficiency
+        if "not available in the provided context" in response.lower():
+            return True  # Honest response about context
+
+        # For web search queries with recent info, check if response contains date markers
+        if "web" in question.lower() and ("2025" in context or "2024" in context):
+            if "2025" not in response and "2024" not in response:
+                logger.warning("Response may not be using current context dates")
+                return False
+
+        return True
+
     @log_execution_time(logger)
     def _parse_response(self, response: str) -> tuple:
         """Parse LLM response into answer and reasoning."""
         answer = response
         reasoning = ""
 
-        if "---REASONING---" in response:
+        # Parse with new format markers
+        if "---ANSWER---" in response and "---REASONING---" in response:
+            answer_start = response.find("---ANSWER---") + len("---ANSWER---")
+            reasoning_start = response.find("---REASONING---") + len("---REASONING---")
+            answer = response[answer_start:reasoning_start].replace("---REASONING---", "").strip()
+            reasoning = response[reasoning_start:].strip()
+        # Fallback to old format for backwards compatibility
+        elif "---REASONING---" in response:
             parts = response.split("---REASONING---")
             answer = parts[0].strip()
             reasoning = parts[1].strip() if len(parts) > 1 else ""
+
+        # Warn if model didn't use context properly
+        if "not available in the provided context" in answer.lower():
+            logger.warning("Model reported context insufficiency")
 
         logger.debug(f"Response parsed | answer_len={len(answer)}, reasoning_len={len(reasoning)}")
         return answer, reasoning
