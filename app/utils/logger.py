@@ -3,6 +3,7 @@ import functools
 import time
 import traceback
 from typing import Callable, Any, Optional
+from pathlib import Path
 from flask import has_request_context, request
 
 
@@ -312,3 +313,70 @@ def _get_request_id() -> str:
     if has_request_context():
         return request.headers.get('X-Request-ID', request.remote_addr)
     return "BACKGROUND"
+
+
+def write_context_to_file(
+    question: str,
+    context: str,
+    retriever_type: str = "vector_store",
+    conversation_id: str = "latest",
+) -> str:
+    """
+    Write query context to a text file. Overwrites previous content.
+    Useful for monitoring the latest query context.
+
+    Args:
+        question: User's question
+        context: Full context provided to LLM
+        retriever_type: Type of retriever used (vector_store or web_search)
+        conversation_id: Conversation identifier (for reference in file)
+
+    Returns:
+        Path to the written file
+
+    Example:
+        write_context_to_file(
+            question="What is AI?",
+            context="Long context text...",
+            retriever_type="vector_store",
+            conversation_id="conv-123"
+        )
+    """
+    # Create debug directory in project root
+    debug_dir = Path(__file__).parent.parent.parent / "debug"
+    debug_dir.mkdir(parents=True, exist_ok=True)
+
+    # Use single file for latest context (overwrites previous)
+    context_file = debug_dir / "latest_context.txt"
+
+    try:
+        with open(context_file, "w", encoding="utf-8") as f:
+            f.write(f"{'='*80}\n")
+            f.write(f"LATEST QUERY CONTEXT\n")
+            f.write(f"{'='*80}\n\n")
+
+            f.write(f"Conversation ID: {conversation_id}\n")
+            f.write(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Retriever Type: {retriever_type}\n")
+            f.write(f"Context Length: {len(context)} characters\n\n")
+
+            f.write(f"{'-'*80}\n")
+            f.write(f"QUESTION:\n")
+            f.write(f"{'-'*80}\n")
+            f.write(f"{question}\n\n")
+
+            f.write(f"{'-'*80}\n")
+            f.write(f"FULL CONTEXT PROVIDED TO LLM:\n")
+            f.write(f"{'-'*80}\n")
+            f.write(f"{context}\n\n")
+
+            f.write(f"{'='*80}\n")
+
+        logger = get_logger(__name__)
+        logger.debug(f"Context written to file | path={context_file}")
+        return str(context_file)
+
+    except Exception as e:
+        logger = get_logger(__name__)
+        logger.error(f"Failed to write context to file | error={str(e)}")
+        return ""

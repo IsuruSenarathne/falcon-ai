@@ -11,7 +11,7 @@ from app.dto.conversation_dto import QueryRequest, QueryResponse
 from app.models.conversation import MessageStatus
 from app.services.conversation_service import ConversationService
 from app.constants.models import LLM_MAIN_MODEL, EMBEDDING_MODEL
-from app.utils.logger import get_logger, log_service_call, log_execution_time, log_errors
+from app.utils.logger import get_logger, log_service_call, log_execution_time, log_errors, write_context_to_file
 
 logger = get_logger(__name__)
 
@@ -93,15 +93,16 @@ Provide your answer according to following rules:
             context = self._format_context(context_docs)
             logger.info(f"Context retrieved | characters={len(str(context))}")
 
-            # Write context to debug folder
+            # Write context to latest_context.txt (overwrites previous)
             conv_id = req.session_id or req.conversation_id or "unknown"
-            DebugService.write_query_context(
-                conversation_id=conv_id,
+            write_context_to_file(
                 question=req.question,
                 context=context,
                 retriever_type=retriever_type,
-                context_docs=context_docs if isinstance(context_docs, list) else [context_docs],
+                conversation_id=conv_id,
             )
+
+            # Write context to debug folder (JSON format)
             logger.debug(f"Debug context written | conversation_id={conv_id}")
 
             # Generate response
@@ -113,14 +114,6 @@ Provide your answer according to following rules:
             answer, reasoning = self._parse_response(response)
             result = self._process_success(req, answer, reasoning)
 
-            # Write response to debug folder
-            DebugService.write_llm_response(
-                conversation_id=conv_id,
-                question=req.question,
-                answer=answer,
-                reasoning=reasoning,
-            )
-
             execution_time_ms = (time.time() - query_start_time) * 1000
             logger.info(f"Query completed successfully | execution_time={execution_time_ms:.2f}ms")
 
@@ -129,18 +122,6 @@ Provide your answer according to following rules:
         except Exception as e:
             execution_time_ms = (time.time() - query_start_time) * 1000
             logger.error(f"Query failed: {str(e)}")
-
-            # Write error summary to debug folder
-            conv_id = req.session_id or req.conversation_id or "unknown"
-            DebugService.write_query_summary(
-                conversation_id=conv_id,
-                question=req.question,
-                status="error",
-                retriever_type=retriever_type or "unknown",
-                context_length=0,
-                execution_time_ms=execution_time_ms,
-                error=str(e),
-            )
 
             return self._process_error(req, str(e))
 
