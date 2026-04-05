@@ -53,32 +53,19 @@ class RAGService:
 
     def _get_prompt_template(self) -> str:
         """Get the prompt template for LLM."""
-        return """SYSTEM INSTRUCTION: You are a helpful assistant answering questions based ONLY on the provided context. You MUST NEVER use your training data or knowledge.
-
-=== MANDATORY RESPONSE FORMAT ===
-1. Use response format as {{"answer": "your answer", "reasoning": "your reasoning"}}
-2. Your answer should be detailed and comprehensive
-
-⚠️ CRITICAL RULES - FOLLOW EXACTLY:
-1. **CONTEXT IS THE ONLY SOURCE**: ONLY use information explicitly in the provided context. NEVER use your training data.
-2. **IF NOT IN CONTEXT**: If the answer cannot be found in the context, you MUST respond with: {{"answer": "This information is not available in the provided context.", "reasoning": "The context does not contain information about this topic."}}
-3. **CITE THE CONTEXT**: Your reasoning MUST show exactly which parts of the context you used.
-4. **NO TRAINING DATA**: Do NOT answer based on what you know. Only answer based on what is in the context.
-5. **VERIFY FIRST**: Before answering, check if the information exists in the context. If not, say it's not available.
-
-DO NOT:
-- Use your training knowledge
-- Add text before or after JSON
-- Include markdown code blocks
-- Return wrong JSON structure
-- Answer if information is not in the provided context
-
+        return """Use the following context to answer the question.
 Context:
 {context}
 
-Question: {question}
+Question:
+{question}
 
-REQUIRED: Return ONLY the JSON object with "answer" and "reasoning" fields. Nothing else.
+MANDATORY RESPONSE FORMAT:
+1. Use response format with "answer" and "reasoning" fields
+2. Your answer should be detailed and comprehensive
+
+RULES:
+- Respond with valid JSON having "answer" and "reasoning" keys
 """
 
     @log_service_call(logger)
