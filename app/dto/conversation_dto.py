@@ -68,6 +68,7 @@ class QueryResponse:
     status: str
     response_time: float
     created_at: str
+    reasoning: Optional[str] = None
     tasks: Optional[List[TaskItem]] = None
     error: Optional[str] = None
 

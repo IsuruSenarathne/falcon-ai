@@ -1,6 +1,5 @@
 """Service for LLM chain creation and invocation."""
 import logging
-from langchain_ollama import OllamaLLM
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
 
@@ -37,14 +36,17 @@ class LLMChainService:
             thinking = chunk.additional_kwargs.get("reasoning_content")
 
             if thinking:
-                logger.debug(f"Thinking: {thinking}")
+                # Print in Gray (\033[90m)
+                print(f"\033[90m{thinking}\033[0m", end="", flush=True)
             elif chunk.content:
                 # Detect transition to final answer
                 if not hasattr(self.llm, '_started_answer'):
-                    logger.debug("--- FINAL ANSWER ---")
+                    print("\n\n--- FINAL ANSWER ---")
                     self.llm._started_answer = True
-                # Log content
-                logger.debug(f"Answer: {chunk.content}")
+                # Print in Default color
+                print(chunk.content, end="", flush=True)
 
-        logger.info(f"LLM response generated ({len(str(response))} characters)")
-        return response
+        # Extract string content from AIMessage
+        response_text = response.content if hasattr(response, 'content') else str(response)
+        logger.info(f"LLM response generated ({len(response_text)} characters)")
+        return response_text

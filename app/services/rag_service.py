@@ -53,22 +53,32 @@ class RAGService:
 
     def _get_prompt_template(self) -> str:
         """Get the prompt template for LLM."""
-        return """You are a helpful assistant. CRITICAL INSTRUCTIONS:
+        return """SYSTEM INSTRUCTION: You are a helpful assistant answering questions based ONLY on the provided context. You MUST NEVER use your training data or knowledge.
 
-1. **USE ONLY THE PROVIDED CONTEXT**: Answer based EXCLUSIVELY on the context provided below.
-2. **IGNORE TRAINING DATA**: Do NOT use your training knowledge if it contradicts the provided context.
-3. **CONTEXT IS AUTHORITATIVE**: If the context contains information, that is the source of truth.
-4. **IF NOT IN CONTEXT**: If the answer is not in the provided context, explicitly state: "This information is not available in the provided context."
+=== MANDATORY RESPONSE FORMAT ===
+1. Use response format as {{"answer": "your answer", "reasoning": "your reasoning"}}
+2. Your answer should be detailed and comprehensive
+
+⚠️ CRITICAL RULES - FOLLOW EXACTLY:
+1. **CONTEXT IS THE ONLY SOURCE**: ONLY use information explicitly in the provided context. NEVER use your training data.
+2. **IF NOT IN CONTEXT**: If the answer cannot be found in the context, you MUST respond with: {{"answer": "This information is not available in the provided context.", "reasoning": "The context does not contain information about this topic."}}
+3. **CITE THE CONTEXT**: Your reasoning MUST show exactly which parts of the context you used.
+4. **NO TRAINING DATA**: Do NOT answer based on what you know. Only answer based on what is in the context.
+5. **VERIFY FIRST**: Before answering, check if the information exists in the context. If not, say it's not available.
+
+DO NOT:
+- Use your training knowledge
+- Add text before or after JSON
+- Include markdown code blocks
+- Return wrong JSON structure
+- Answer if information is not in the provided context
 
 Context:
 {context}
 
 Question: {question}
 
-Provide your answer according to following rules:
-1. Use response format as {{ answer: "your answer", reasoning: "your reasoning" }}
-2. Your answer should be detailed and comprehensive.
-3. Your reasoning should clearly explain how you arrived at the answer based on the context.
+REQUIRED: Return ONLY the JSON object with "answer" and "reasoning" fields. Nothing else.
 """
 
     @log_service_call(logger)
@@ -165,16 +175,34 @@ Provide your answer according to following rules:
     @log_execution_time(logger)
     def _parse_response(self, response: str) -> tuple:
         """Parse LLM response into answer and reasoning."""
+        import json
         answer = response
         reasoning = ""
 
-        # Parse with new format markers
+        # Try to parse JSON format first
+        try:
+            # Clean response - remove markdown code blocks if present
+            cleaned = response.strip()
+            if cleaned.startswith('```'):
+                cleaned = cleaned.split('```')[1]
+                if cleaned.startswith('json'):
+                    cleaned = cleaned[4:]
+                cleaned = cleaned.split('```')[0]
+
+            parsed = json.loads(cleaned)
+            answer = parsed.get("answer", response).strip()
+            reasoning = parsed.get("reasoning", "").strip()
+            logger.debug(f"Response parsed (JSON format) | answer_len={len(answer)}, reasoning_len={len(reasoning)}")
+            return answer, reasoning
+        except (json.JSONDecodeError, ValueError, AttributeError):
+            pass
+
+        # Fallback: Parse with marker format for backwards compatibility
         if "---ANSWER---" in response and "---REASONING---" in response:
             answer_start = response.find("---ANSWER---") + len("---ANSWER---")
             reasoning_start = response.find("---REASONING---") + len("---REASONING---")
             answer = response[answer_start:reasoning_start].replace("---REASONING---", "").strip()
             reasoning = response[reasoning_start:].strip()
-        # Fallback to old format for backwards compatibility
         elif "---REASONING---" in response:
             parts = response.split("---REASONING---")
             answer = parts[0].strip()
@@ -208,7 +236,8 @@ Provide your answer according to following rules:
         return QueryResponse(
             conversation_id=conversation_id,
             question=req.question,
-            answer=formatted_answer,
+            answer=answer,
+            reasoning=reasoning if reasoning else None,
             status="success",
             response_time=0,
             created_at=bot_msg.created_at.isoformat(),
