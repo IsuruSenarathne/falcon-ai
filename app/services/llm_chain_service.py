@@ -26,12 +26,13 @@ class LLMChainService:
         logger.info(f"Invoking LLM chain with {self.model_name}... (thinking={'enabled' if self.enable_thinking else 'disabled'})")
         logger.debug(f"Context length: {len(str(context))} characters")
 
+        cleaned_question = question.replace("websearch", "")
         response = self.chain.invoke({
             "context": context,
-            "question": question
+            "question": cleaned_question + "use the given context to answer."
         })
 
-        for chunk in self.chain.stream({"context": context, "question": question}):
+        for chunk in self.chain.stream({"context": context, "question": cleaned_question + "use the given context to answer."}):
             # Extract reasoning from additional_kwargs
             thinking = chunk.additional_kwargs.get("reasoning_content")
 
