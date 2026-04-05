@@ -54,6 +54,7 @@ langchain==0.3.28
 langchain-chroma==0.2.6
 langchain-community==0.3.31
 langchain-core==0.3.83
+langchain-ollama==0.2.1
 langchain-google-genai==2.1.12
 langchain-text-splitters==0.3.11
 langsmith==0.4.37
