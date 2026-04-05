@@ -1,8 +1,11 @@
 """Web search retriever using SearchService."""
+import logging
 from typing import List
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from search_service import SearchService
+
+logger = logging.getLogger(__name__)
 
 
 class SearchRetriever(BaseRetriever):
@@ -17,10 +20,13 @@ class SearchRetriever(BaseRetriever):
     def _get_relevant_documents(self, query: str) -> List[Document]:
         """Fetch documents from web search."""
         try:
+            logger.info(f"🔍 Searching web for: {query}")
             search_results = self.search_service.search(query, self.num_results)
-            documents = []
+            logger.info(f"✓ Found {len(search_results)} web results")
 
-            for result in search_results:
+            documents = []
+            for i, result in enumerate(search_results, 1):
+                logger.info(f"  [{i}] Processing: {result.get('title', 'Untitled')[:50]}...")
                 doc = Document(
                     page_content=result.get("content", ""),
                     metadata={
@@ -30,11 +36,12 @@ class SearchRetriever(BaseRetriever):
                 )
                 documents.append(doc)
 
+            logger.info(f"✓ Converted {len(documents)} results to documents")
             return documents
 
         except ValueError as e:
-            print(f"⚠ Web search error: {e}")
+            logger.warning(f"⚠ Web search error: {e}")
             return []
         except Exception as e:
-            print(f"⚠ Error fetching search results: {e}")
+            logger.error(f"⚠ Error fetching search results: {e}")
             return []

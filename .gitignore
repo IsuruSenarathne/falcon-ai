@@ -1,2 +1,7 @@
 .env
 langchain-env
+
+# ChromaDB vector stores
+app2/chroma_db/*
+app/chroma_db/
+app2/chroma_db/chroma.sqlite3

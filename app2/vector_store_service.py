@@ -1,9 +1,12 @@
 """Service for managing vector store and retrieval."""
 import os
+import logging
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from typing import List
+
+logger = logging.getLogger(__name__)
 
 
 class VectorStoreService:
@@ -37,9 +40,12 @@ class VectorStoreService:
 
     def get_retriever(self):
         """Get configured retriever from vector store."""
+        logger.info(f"  → Creating retriever (k={self.retrieval_k})...")
         vector_store = Chroma(
             collection_name=self.collection_name,
             embedding_function=self.embeddings,
             persist_directory=self.db_path
         )
-        return vector_store.as_retriever(search_kwargs={"k": self.retrieval_k})
+        retriever = vector_store.as_retriever(search_kwargs={"k": self.retrieval_k})
+        logger.info(f"  ✓ Retriever created")
+        return retriever

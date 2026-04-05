@@ -1,7 +1,10 @@
 """Service for LLM chain creation and invocation."""
+import logging
 from langchain_ollama import OllamaLLM
 from langchain_core.prompts import ChatPromptTemplate
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class LLMChainService:
@@ -16,8 +19,13 @@ class LLMChainService:
 
     def invoke(self, question: str, context: str) -> str:
         """Invoke chain with question and context."""
+        logger.info(f"  → Invoking LLM chain with {self.model_name}...")
+        logger.debug(f"    Context length: {len(str(context))} characters")
+
         response = self.chain.invoke({
             "context": context,
             "question": question
         })
+
+        logger.info(f"  ✓ LLM response generated ({len(str(response))} characters)")
         return response
