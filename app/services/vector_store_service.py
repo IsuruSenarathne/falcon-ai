@@ -5,8 +5,9 @@ from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from typing import List
+from app.utils.logger import get_logger, log_execution_time, log_errors
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class VectorStoreService:
@@ -29,23 +30,29 @@ class VectorStoreService:
         if not os.path.exists(self.db_path):
             os.makedirs(self.db_path)
 
+    @log_execution_time(logger, threshold_ms=100)
+    @log_errors(logger)
     def add_documents(self, documents: List[Document], ids: List[str]) -> None:
         """Add documents to vector store."""
+        logger.debug(f"Adding {len(documents)} documents to vector store")
         vector_store = Chroma(
             collection_name=self.collection_name,
             embedding_function=self.embeddings,
             persist_directory=self.db_path
         )
         vector_store.add_documents(documents=documents, ids=ids)
+        logger.info(f"Documents added to vector store | count={len(documents)}")
 
+    @log_execution_time(logger, threshold_ms=50)
+    @log_errors(logger)
     def get_retriever(self):
         """Get configured retriever from vector store."""
-        logger.info(f"Creating retriever (k={self.retrieval_k})...")
+        logger.debug(f"Creating retriever | k={self.retrieval_k}")
         vector_store = Chroma(
             collection_name=self.collection_name,
             embedding_function=self.embeddings,
             persist_directory=self.db_path
         )
         retriever = vector_store.as_retriever(search_kwargs={"k": self.retrieval_k})
-        logger.info("Retriever created")
+        logger.info("Retriever created successfully")
         return retriever

@@ -4,8 +4,9 @@ import logging
 from typing import List, Optional
 from bs4 import BeautifulSoup
 import requests
+from app.utils.logger import get_logger, log_execution_time, log_errors
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SearchService:
@@ -21,6 +22,8 @@ class SearchService:
         self.api_key = os.getenv("BRAVE_API_KEY")
         self.user_agent_index = 0
 
+    @log_execution_time(logger, threshold_ms=100)
+    @log_errors(logger)
     def search(self, query: str, num_results: int = 5) -> List[dict]:
         """
         Search using Brave Search API and fetch content from top results.
@@ -38,10 +41,13 @@ class SearchService:
         if not self.api_key:
             raise ValueError("BRAVE_API_KEY not set")
 
+        logger.debug(f"Starting web search | query={query[:50]}... | num_results={num_results}")
+
         # Search using Brave API
         search_results = self._brave_search(query, num_results)
 
         if not search_results:
+            logger.warning(f"No search results found for query")
             return []
 
         # Fetch content from top results
@@ -55,11 +61,14 @@ class SearchService:
                     "content": content
                 })
 
+        logger.info(f"Web search completed | fetched={len(fetched)} results")
         return fetched
 
+    @log_execution_time(logger, threshold_ms=100)
+    @log_errors(logger)
     def _brave_search(self, query: str, num_results: int = 5) -> List[dict]:
         """Call Brave Search API."""
-        logger.info("Calling Brave Search API...")
+        logger.debug("Calling Brave Search API...")
         url = "https://api.search.brave.com/res/v1/web/search"
         headers = {
             "Accept": "application/json",
@@ -77,7 +86,7 @@ class SearchService:
 
             data = response.json()
             results = data.get("web", {}).get("results", [])
-            logger.info(f"Got {len(results)} raw results from API")
+            logger.debug(f"Got {len(results)} raw results from API")
 
             parsed_results = []
             for item in results:
@@ -87,13 +96,14 @@ class SearchService:
                         "link": item.get("url", ""),
                     })
 
-            logger.info(f"Parsed {len(parsed_results)} results")
+            logger.info(f"Brave API search completed | parsed_results={len(parsed_results)}")
             return parsed_results
 
         except Exception as e:
             logger.error(f"Brave Search API error: {e}")
             raise Exception(f"Brave Search API error: {e}")
 
+    @log_execution_time(logger, threshold_ms=50)
     def _fetch_url_content(self, url: str) -> Optional[str]:
         """Fetch and extract text content from a URL."""
         try:
@@ -113,14 +123,14 @@ class SearchService:
             text = " ".join(text.split())
 
             if text:
-                logger.debug(f"Extracted {len(text)} characters")
+                logger.debug(f"Content extracted | characters={len(text)}")
                 return text
             else:
-                logger.debug("No content found")
+                logger.debug("No content found in page")
                 return None
 
         except Exception as e:
-            logger.debug(f"Failed to fetch: {str(e)[:50]}")
+            logger.debug(f"Failed to fetch content | error={str(e)[:50]}")
             return None
 
     def _get_headers(self) -> dict:

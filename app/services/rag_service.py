@@ -1,5 +1,6 @@
 """Simplified RAG service using app2 architecture."""
 import logging
+import time
 from langchain_core.documents import Document
 from app.services.vector_store_service import VectorStoreService
 from app.services.llm_chain_service import LLMChainService
@@ -10,8 +11,9 @@ from app.dto.conversation_dto import QueryRequest, QueryResponse
 from app.models.conversation import MessageStatus
 from app.services.conversation_service import ConversationService
 from app.constants.models import LLM_MAIN_MODEL, EMBEDDING_MODEL
+from app.utils.logger import get_logger, log_service_call, log_execution_time, log_errors
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RAGService:
@@ -63,44 +65,83 @@ Provide your answer according to following rules:
 3. Your reasoning should clearly explain how you arrived at the answer based on the context.
 """
 
+    @log_service_call(logger)
+    @log_errors(logger)
     def query(self, req: QueryRequest) -> QueryResponse:
         """Execute a query using vector store or web search."""
         if not req.question or not req.question.strip():
             raise ValueError("Question cannot be empty")
 
-        logger.info("=" * 60)
-        logger.info(f"New query: {req.question[:60]}...")
+        logger.info(f"Query started | question={req.question[:60]}... | user_id={req.user_id}")
+        query_start_time = time.time()
+        retriever_type = None
 
         try:
             # Determine retriever
             if "websearch" in req.question.lower():
                 logger.info("Using WEB SEARCH retriever")
+                retriever_type = "web_search"
                 retriever = SearchRetriever(search_service=self.search_service)
             else:
                 logger.info("Using VECTOR STORE retriever")
+                retriever_type = "vector_store"
                 retriever = self.vector_store.get_retriever()
 
             # Retrieve context
-            logger.info("Step 1: Retrieving context...")
+            logger.debug("Step 1: Retrieving context...")
             context_docs = retriever.invoke(req.question)
             context = self._format_context(context_docs)
-            logger.info(f"Retrieved {len(str(context))} characters of context")
+            logger.info(f"Context retrieved | characters={len(str(context))}")
+
+            # Write context to debug folder
+            conv_id = req.session_id or req.conversation_id or "unknown"
+            DebugService.write_query_context(
+                conversation_id=conv_id,
+                question=req.question,
+                context=context,
+                retriever_type=retriever_type,
+                context_docs=context_docs if isinstance(context_docs, list) else [context_docs],
+            )
+            logger.debug(f"Debug context written | conversation_id={conv_id}")
 
             # Generate response
-            logger.info("Step 2: Generating response with LLM...")
+            logger.debug("Step 2: Generating response with LLM...")
             response = self.llm_chain.invoke(req.question, context)
-            logger.info("Response generated")
-            logger.info("=" * 60)
+            logger.debug("LLM response generated")
 
             # Parse and save
             answer, reasoning = self._parse_response(response)
             result = self._process_success(req, answer, reasoning)
 
+            # Write response to debug folder
+            DebugService.write_llm_response(
+                conversation_id=conv_id,
+                question=req.question,
+                answer=answer,
+                reasoning=reasoning,
+            )
+
+            execution_time_ms = (time.time() - query_start_time) * 1000
+            logger.info(f"Query completed successfully | execution_time={execution_time_ms:.2f}ms")
+
             return result
 
         except Exception as e:
-            logger.error(f"Error: {str(e)}")
-            logger.info("=" * 60)
+            execution_time_ms = (time.time() - query_start_time) * 1000
+            logger.error(f"Query failed: {str(e)}")
+
+            # Write error summary to debug folder
+            conv_id = req.session_id or req.conversation_id or "unknown"
+            DebugService.write_query_summary(
+                conversation_id=conv_id,
+                question=req.question,
+                status="error",
+                retriever_type=retriever_type or "unknown",
+                context_length=0,
+                execution_time_ms=execution_time_ms,
+                error=str(e),
+            )
+
             return self._process_error(req, str(e))
 
     def _format_context(self, docs) -> str:
@@ -110,6 +151,7 @@ Provide your answer according to following rules:
         else:
             return docs.page_content if hasattr(docs, 'page_content') else str(docs)
 
+    @log_execution_time(logger)
     def _parse_response(self, response: str) -> tuple:
         """Parse LLM response into answer and reasoning."""
         answer = response
@@ -120,14 +162,17 @@ Provide your answer according to following rules:
             answer = parts[0].strip()
             reasoning = parts[1].strip() if len(parts) > 1 else ""
 
+        logger.debug(f"Response parsed | answer_len={len(answer)}, reasoning_len={len(reasoning)}")
         return answer, reasoning
 
+    @log_execution_time(logger)
     def _process_success(self, req: QueryRequest, answer: str, reasoning: str) -> QueryResponse:
         """Process successful query."""
         formatted_answer = answer
         if reasoning:
             formatted_answer += f"\n\nReasoning:\n{reasoning}"
 
+        logger.debug(f"Saving successful query to DB")
         conversation_id, bot_msg = ConversationService.save_exchange(
             question=req.question,
             answer=formatted_answer,
@@ -137,6 +182,7 @@ Provide your answer according to following rules:
             response_time=0,
         )
 
+        logger.debug(f"Query saved | conversation_id={conversation_id}")
         return QueryResponse(
             conversation_id=conversation_id,
             question=req.question,
@@ -146,8 +192,10 @@ Provide your answer according to following rules:
             created_at=bot_msg.created_at.isoformat(),
         )
 
+    @log_execution_time(logger)
     def _process_error(self, req: QueryRequest, error: str) -> QueryResponse:
         """Process failed query."""
+        logger.warning(f"Saving failed query to DB | error={error}")
         conversation_id, _ = ConversationService.save_exchange(
             question=req.question,
             answer=None,
@@ -158,6 +206,7 @@ Provide your answer according to following rules:
             response_time=0,
         )
 
+        logger.debug(f"Error query saved | conversation_id={conversation_id}")
         return QueryResponse(
             conversation_id=conversation_id,
             question=req.question,

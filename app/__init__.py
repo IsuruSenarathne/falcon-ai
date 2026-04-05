@@ -12,6 +12,7 @@ def create_app() -> Flask:
     app.rag_service = RAGService()
 
     from app.controllers.conversation_controller import conversation_bp
+
     app.register_blueprint(conversation_bp)
 
     return app
