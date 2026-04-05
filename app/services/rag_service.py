@@ -65,11 +65,10 @@ Context:
 
 Question: {question}
 
-Provide your answer in this format:
----ANSWER---
-[Your detailed answer based ONLY on the provided context]
----REASONING---
-[Explain how the answer comes from the provided context, cite specific parts if relevant]
+Provide your answer according to following rules:
+1. Use response format as {{ answer: "your answer", reasoning: "your reasoning" }}
+2. Your answer should be detailed and comprehensive.
+3. Your reasoning should clearly explain how you arrived at the answer based on the context.
 """
 
     @log_service_call(logger)
