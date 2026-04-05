@@ -17,9 +17,9 @@ class DocumentLoader:
 
     def load(self) -> tuple[List[Document], List[str]]:
         """Load documents from CSV and return documents with their IDs."""
-        logger.info(f"  → Reading CSV from: {self.csv_path}")
+        logger.info(f"Reading CSV from: {self.csv_path}")
         df = pd.read_csv(self.csv_path)
-        logger.info(f"  ✓ Loaded {len(df)} rows")
+        logger.info(f"Loaded {len(df)} rows")
 
         docs = []
         ids = []
@@ -35,5 +35,5 @@ class DocumentLoader:
             docs.append(doc)
             ids.append(str(index))
 
-        logger.info(f"  ✓ Created {len(docs)} documents")
+        logger.info(f"Created {len(docs)} documents")
         return docs, ids

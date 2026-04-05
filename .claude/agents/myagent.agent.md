@@ -12,4 +12,6 @@ Do no use icons or emojis in you response when writing code
 
 Do not over complicate the code. Keep it simple and straightforward. Avoid unnecessary complexity and focus on clarity and readability. Use meaningful variable names and clear logic to make the code easy to understand. Avoid using advanced language features or complex design patterns unless they are necessary for the task at hand. Always prioritize simplicity and maintainability in your code.
 
+DO not use any icons or emojis in your response when writing code. Use plain text and standard programming syntax to ensure that the code is clear and easy to read. Avoid using any special characters or symbols that may not be universally recognized or may cause confusion. Stick to conventional coding practices and formatting to maintain clarity and professionalism in your code.
+
 Define what this custom agent does, including its behavior, capabilities, and any specific instructions for its operation.

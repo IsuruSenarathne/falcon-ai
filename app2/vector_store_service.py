@@ -40,12 +40,12 @@ class VectorStoreService:
 
     def get_retriever(self):
         """Get configured retriever from vector store."""
-        logger.info(f"  → Creating retriever (k={self.retrieval_k})...")
+        logger.info(f"Creating retriever (k={self.retrieval_k})...")
         vector_store = Chroma(
             collection_name=self.collection_name,
             embedding_function=self.embeddings,
             persist_directory=self.db_path
         )
         retriever = vector_store.as_retriever(search_kwargs={"k": self.retrieval_k})
-        logger.info(f"  ✓ Retriever created")
+        logger.info("Retriever created")
         return retriever

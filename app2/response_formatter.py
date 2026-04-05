@@ -15,8 +15,8 @@ class ResponseFormatter:
 
     def display(self, response: str) -> None:
         """Display formatted response."""
-        logger.info("📤 Displaying response...")
+        logger.info("Displaying response...")
         print(f"\n{self.SEPARATOR}")
         print(self.format(response))
         print(f"{self.SEPARATOR}\n")
-        logger.info("✓ Response displayed")
+        logger.info("Response displayed")

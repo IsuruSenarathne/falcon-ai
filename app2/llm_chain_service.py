@@ -19,13 +19,13 @@ class LLMChainService:
 
     def invoke(self, question: str, context: str) -> str:
         """Invoke chain with question and context."""
-        logger.info(f"  → Invoking LLM chain with {self.model_name}...")
-        logger.debug(f"    Context length: {len(str(context))} characters")
+        logger.info(f"Invoking LLM chain with {self.model_name}...")
+        logger.debug(f"Context length: {len(str(context))} characters")
 
         response = self.chain.invoke({
             "context": context,
             "question": question
         })
 
-        logger.info(f"  ✓ LLM response generated ({len(str(response))} characters)")
+        logger.info(f"LLM response generated ({len(str(response))} characters)")
         return response

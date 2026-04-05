@@ -59,7 +59,7 @@ class SearchService:
 
     def _brave_search(self, query: str, num_results: int = 5) -> List[dict]:
         """Call Brave Search API."""
-        logger.info(f"  → Calling Brave Search API...")
+        logger.info("Calling Brave Search API...")
         url = "https://api.search.brave.com/res/v1/web/search"
         headers = {
             "Accept": "application/json",
@@ -71,13 +71,13 @@ class SearchService:
         }
 
         try:
-            logger.debug(f"  → Making request to Brave API...")
+            logger.debug("Making request to Brave API...")
             response = requests.get(url, headers=headers, params=params, timeout=10)
             response.raise_for_status()
 
             data = response.json()
             results = data.get("web", {}).get("results", [])
-            logger.info(f"    ✓ Got {len(results)} raw results from API")
+            logger.info(f"Got {len(results)} raw results from API")
 
             parsed_results = []
             for item in results:
@@ -87,17 +87,17 @@ class SearchService:
                         "link": item.get("url", ""),
                     })
 
-            logger.info(f"    ✓ Parsed {len(parsed_results)} results")
+            logger.info(f"Parsed {len(parsed_results)} results")
             return parsed_results
 
         except Exception as e:
-            logger.error(f"    ✗ Brave Search API error: {e}")
+            logger.error(f"Brave Search API error: {e}")
             raise Exception(f"Brave Search API error: {e}")
 
     def _fetch_url_content(self, url: str) -> Optional[str]:
         """Fetch and extract text content from a URL."""
         try:
-            logger.debug(f"    Fetching content from: {url[:60]}...")
+            logger.debug(f"Fetching content from: {url[:60]}...")
             headers = self._get_headers()
             response = requests.get(url, headers=headers, timeout=5)
             response.raise_for_status()
@@ -113,14 +113,14 @@ class SearchService:
             text = " ".join(text.split())
 
             if text:
-                logger.debug(f"      ✓ Extracted {len(text)} characters")
+                logger.debug(f"Extracted {len(text)} characters")
                 return text
             else:
-                logger.debug(f"      ⚠ No content found")
+                logger.debug("No content found")
                 return None
 
         except Exception as e:
-            logger.debug(f"      ✗ Failed to fetch: {str(e)[:50]}")
+            logger.debug(f"Failed to fetch: {str(e)[:50]}")
             return None
 
     def _get_headers(self) -> dict:

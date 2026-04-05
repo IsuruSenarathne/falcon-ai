@@ -1,7 +1,7 @@
-"""Entry point for RAG application."""
+"""Entry point for Flask app."""
 import os
 from pathlib import Path
-from rag_application import RAGApplication
+from app import create_app
 
 # Load .env file from parent directory
 env_path = Path(__file__).parent.parent / ".env"
@@ -14,5 +14,5 @@ if env_path.exists():
                 os.environ[key.strip()] = value.strip()
 
 if __name__ == "__main__":
-    app = RAGApplication()
-    app.run_interactive()
+    app = create_app()
+    app.run(debug=True, port=8080)
