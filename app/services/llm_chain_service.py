@@ -2,7 +2,7 @@
 import logging
 from langchain_ollama import OllamaLLM
 from langchain_core.prompts import ChatPromptTemplate
-from typing import Any
+from langchain_ollama import ChatOllama
 
 logger = logging.getLogger(__name__)
 
@@ -14,10 +14,10 @@ class LLMChainService:
         self.model_name = model
         self.temperature = temperature
         self.enable_thinking = enable_thinking
-        self.llm = OllamaLLM(
+        self.llm = ChatOllama(
             model=model,
             temperature=temperature,
-            model_kwargs={"think": enable_thinking}
+            reasoning=True
         )
         self.prompt = ChatPromptTemplate.from_template(prompt_template)
         self.chain = self.prompt | self.llm
@@ -31,6 +31,20 @@ class LLMChainService:
             "context": context,
             "question": question
         })
+
+        for chunk in self.chain.stream({"context": context, "question": question}):
+            # Extract reasoning from additional_kwargs
+            thinking = chunk.additional_kwargs.get("reasoning_content")
+
+            if thinking:
+                logger.debug(f"Thinking: {thinking}")
+            elif chunk.content:
+                # Detect transition to final answer
+                if not hasattr(self.llm, '_started_answer'):
+                    logger.debug("--- FINAL ANSWER ---")
+                    self.llm._started_answer = True
+                # Log content
+                logger.debug(f"Answer: {chunk.content}")
 
         logger.info(f"LLM response generated ({len(str(response))} characters)")
         return response
