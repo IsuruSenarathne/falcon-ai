@@ -182,8 +182,21 @@ RULES:
                 cleaned = cleaned.split('```')[0]
 
             parsed = json.loads(cleaned)
-            answer = parsed.get("answer", response).strip()
-            reasoning = parsed.get("reasoning", "").strip()
+            answer = parsed.get("answer", response)
+            reasoning = parsed.get("reasoning", "")
+
+            # If answer is a JSON string, try to parse it again
+            if isinstance(answer, str) and answer.strip().startswith('{'):
+                try:
+                    nested = json.loads(answer)
+                    answer = nested.get("answer", answer)
+                    if not reasoning:
+                        reasoning = nested.get("reasoning", "")
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+            answer = answer.strip() if isinstance(answer, str) else str(answer)
+            reasoning = reasoning.strip() if isinstance(reasoning, str) else str(reasoning)
             logger.debug(f"Response parsed (JSON format) | answer_len={len(answer)}, reasoning_len={len(reasoning)}")
             return answer, reasoning
         except (json.JSONDecodeError, ValueError, AttributeError):

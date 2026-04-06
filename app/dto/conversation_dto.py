@@ -73,10 +73,27 @@ class QueryResponse:
     error: Optional[str] = None
 
     def to_dict(self) -> dict:
-        data = asdict(self)
+        # Wrap answer and reasoning in data object
+        data_obj = {
+            "answer": self.answer,
+            "reasoning": self.reasoning
+        }
+
+        response_dict = {
+            "data": data_obj,
+            "conversation_id": self.conversation_id,
+            "question": self.question,
+            "status": self.status,
+            "response_time": self.response_time,
+            "created_at": self.created_at
+        }
+
+        if self.error:
+            response_dict["error"] = self.error
         if self.tasks:
-            data['tasks'] = [t.to_dict() if hasattr(t, 'to_dict') else asdict(t) for t in self.tasks]
-        return data
+            response_dict['tasks'] = [t.to_dict() if hasattr(t, 'to_dict') else asdict(t) for t in self.tasks]
+
+        return response_dict
 
 
 @dataclass
