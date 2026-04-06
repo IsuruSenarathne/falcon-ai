@@ -90,20 +90,26 @@ RULES:
                 retriever_type = "datasource"
                 retriever = self.vector_store.get_retriever()
             else:
-                # Default: vector_store
-                logger.info(f"Using VECTOR STORE retriever | context_type={req.context_type}")
-                retriever_type = "vector_store"
-                retriever = self.vector_store.get_retriever()
+                # Default: user should use their own knowledge - no external context
+                logger.info(f"No context_type specified | context_type={req.context_type}")
+                retriever_type = "none"
+                retriever = None
 
             # Retrieve context
             logger.debug("Step 1: Retrieving context...")
-            context_docs = retriever.invoke(req.question)
-            context = self._format_context(context_docs)
-            logger.info(f"Context retrieved | characters={len(str(context))}")
+            if retriever:
+                context_docs = retriever.invoke(req.question)
+                context = self._format_context(context_docs)
+                logger.info(f"Context retrieved | characters={len(str(context))}")
 
-            # Log context availability for debugging
-            if not context or len(context.strip()) < 10:
-                logger.warning("Minimal context retrieved - LLM may fall back to training data")
+                # If context is minimal, use default message
+                if not context or len(context.strip()) < 10:
+                    logger.warning("Minimal context retrieved - using default knowledge prompt")
+                    context = "You need to use your own knowledge to answer this question. No external context is available."
+            else:
+                # No retriever specified - use default message
+                logger.info("Using default mode - no retriever selected")
+                context = "You need to use your own knowledge to answer this question. No external context is available."
 
             # Write context to latest_context.txt (overwrites previous)
             conv_id = req.session_id or req.conversation_id or "unknown"

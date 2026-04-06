@@ -29,10 +29,10 @@ class LLMChainService:
         cleaned_question = question.replace("websearch", "")
         response = self.chain.invoke({
             "context": context,
-            "question": cleaned_question + "use the given context to answer."
+            "question": cleaned_question
         })
 
-        for chunk in self.chain.stream({"context": context, "question": cleaned_question + "use the given context to answer."}):
+        for chunk in self.chain.stream({"context": context, "question": cleaned_question}):
             # Extract reasoning from additional_kwargs
             thinking = chunk.additional_kwargs.get("reasoning_content")
 
