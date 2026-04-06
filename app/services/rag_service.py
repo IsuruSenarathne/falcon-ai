@@ -80,13 +80,18 @@ RULES:
         retriever_type = None
 
         try:
-            # Determine retriever
-            if "websearch" in req.question.lower():
-                logger.info("Using WEB SEARCH retriever")
+            # Determine retriever based on context_type
+            if req.context_type == "web_search" or "websearch" in req.question.lower():
+                logger.info(f"Using WEB SEARCH retriever | context_type={req.context_type}")
                 retriever_type = "web_search"
                 retriever = SearchRetriever(search_service=self.search_service)
+            elif req.context_type == "datasource":
+                logger.info(f"Using DATASOURCE retriever | context_type={req.context_type}")
+                retriever_type = "datasource"
+                retriever = self.vector_store.get_retriever()
             else:
-                logger.info("Using VECTOR STORE retriever")
+                # Default: vector_store
+                logger.info(f"Using VECTOR STORE retriever | context_type={req.context_type}")
                 retriever_type = "vector_store"
                 retriever = self.vector_store.get_retriever()
 
