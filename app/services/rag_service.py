@@ -63,9 +63,12 @@ Question:
 MANDATORY RESPONSE FORMAT:
 1. Use response format with "answer" and "reasoning" fields
 2. Your answer should be detailed and comprehensive
+3. for the response follow the format of {{ "answer": "...", "reasoning": "..." }}
+4. Always follow the response format strictly - do not include any explanations outside of the JSON structure
+5. Do not include any other characters other than the proper format.
 
 RULES:
-- Respond with valid JSON having "answer" and "reasoning" keys
+- Never include markdown code blocks or backticks, only raw JSON
 """
 
     @log_service_call(logger)
@@ -174,57 +177,27 @@ RULES:
     def _parse_response(self, response: str) -> tuple:
         """Parse LLM response into answer and reasoning."""
         import json
-        answer = response
-        reasoning = ""
 
-        # Try to parse JSON format first
         try:
-            # Clean response - remove markdown code blocks if present
+            # Remove markdown code blocks if present
             cleaned = response.strip()
             if cleaned.startswith('```'):
                 cleaned = cleaned.split('```')[1]
                 if cleaned.startswith('json'):
                     cleaned = cleaned[4:]
-                cleaned = cleaned.split('```')[0]
+                cleaned = cleaned.split('```')[0].strip()
 
+            # Parse JSON
             parsed = json.loads(cleaned)
-            answer = parsed.get("answer", response)
-            reasoning = parsed.get("reasoning", "")
+            answer = parsed.get("answer", response).strip()
+            reasoning = parsed.get("reasoning", "").strip()
 
-            # If answer is a JSON string, try to parse it again
-            if isinstance(answer, str) and answer.strip().startswith('{'):
-                try:
-                    nested = json.loads(answer)
-                    answer = nested.get("answer", answer)
-                    if not reasoning:
-                        reasoning = nested.get("reasoning", "")
-                except (json.JSONDecodeError, ValueError):
-                    pass
-
-            answer = answer.strip() if isinstance(answer, str) else str(answer)
-            reasoning = reasoning.strip() if isinstance(reasoning, str) else str(reasoning)
-            logger.debug(f"Response parsed (JSON format) | answer_len={len(answer)}, reasoning_len={len(reasoning)}")
+            logger.debug(f"Response parsed | answer_len={len(answer)}, reasoning_len={len(reasoning)}")
             return answer, reasoning
         except (json.JSONDecodeError, ValueError, AttributeError):
-            pass
-
-        # Fallback: Parse with marker format for backwards compatibility
-        if "---ANSWER---" in response and "---REASONING---" in response:
-            answer_start = response.find("---ANSWER---") + len("---ANSWER---")
-            reasoning_start = response.find("---REASONING---") + len("---REASONING---")
-            answer = response[answer_start:reasoning_start].replace("---REASONING---", "").strip()
-            reasoning = response[reasoning_start:].strip()
-        elif "---REASONING---" in response:
-            parts = response.split("---REASONING---")
-            answer = parts[0].strip()
-            reasoning = parts[1].strip() if len(parts) > 1 else ""
-
-        # Warn if model didn't use context properly
-        if "not available in the provided context" in answer.lower():
-            logger.warning("Model reported context insufficiency")
-
-        logger.debug(f"Response parsed | answer_len={len(answer)}, reasoning_len={len(reasoning)}")
-        return answer, reasoning
+            # Fallback: return full response as answer
+            logger.debug("Failed to parse JSON, returning full response as answer")
+            return response.strip(), ""
 
     @log_execution_time(logger)
     def _process_success(self, req: QueryRequest, answer: str, reasoning: str) -> QueryResponse:
