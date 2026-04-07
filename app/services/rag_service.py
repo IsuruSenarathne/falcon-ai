@@ -53,7 +53,7 @@ class RAGService:
 
     def _get_prompt_template(self) -> str:
         """Get the prompt template for LLM with improved structure."""
-        return """Use the following context to answer the question.
+        return """Use the following context to answer the question thoroughly and accurately.
 
 Context:
 {context}
@@ -61,33 +61,22 @@ Context:
 Question:
 {question}
 
-=== MANDATORY RESPONSE FORMAT ===
-Return ONLY valid JSON, nothing else. No markdown, no code blocks, no explanations.
+=== STRICT RESPONSE FORMAT ===
+You MUST follow this exact format with no variations:
 
-Format:
-{{"answer": "...", "reasoning": "..."}}
+ANSWER: [Your complete answer with all specific details, numbers, names, examples]
 
-=== ANSWER REQUIREMENTS ===
-- Include ALL specific details, names, numbers, examples
-- For lists/multiple items: list them with numbers or bullet points within the answer
-- Be comprehensive and detailed in the answer field
-- Never put important details only in reasoning
+REASONING: [Step-by-step explanation numbered as 1. ... 2. ... 3. ... Only include if question needs explanation]
 
-=== REASONING REQUIREMENTS ===
-- Show step-by-step logic numbered as: 1. ... 2. ... 3. ...
-- Explain WHY the answer is correct
-- Keep reasoning concise but complete
-- Only include reasoning if question asks for explanation
-
-=== STRICT RULES ===
-1. ONLY output valid JSON - no other text
-2. Never use markdown backticks or code blocks
-3. Both fields must be non-empty strings
-4. Answer must contain all specific information (no vague intro)
-5. Do not put details in reasoning that belong in answer
-6. Double-check JSON is valid before responding
-
-Start your response with {{ and end with }}"""
+=== REQUIREMENTS ===
+- Do NOT include "ANSWER:" or "REASONING:" labels in the content - only as section headers
+- NEVER output JSON, code blocks, or markdown formatting
+- NEVER include duplicate information
+- Answer must be a complete statement with all specific details (no vague intros)
+- If answer is a list: use comma-separated items or numbered bullets
+- Keep all important details in ANSWER section
+- Number reasoning steps: 1. ... 2. ... 3. ...
+- Reasoning can be omitted if question doesn't require explanation"""
 
     @log_service_call(logger)
     @log_errors(logger)
@@ -195,85 +184,136 @@ Start your response with {{ and end with }}"""
         return True
 
     def _validate_response_format(self, response: str) -> bool:
-        """Validate response format (Issue 1 detection and logging).
+        """Validate response format follows ANSWER: ... REASONING: ... structure.
 
         Returns True if format is valid, logs warnings if not.
         """
-        import json
-
         cleaned = response.strip()
 
-        # Check for markdown code blocks (bad format)
-        if "```" in cleaned and "{" in cleaned:
-            logger.warning("Response contains markdown code blocks with JSON - format may be malformed")
-
-        # Check if response is valid JSON
-        try:
-            # Remove markdown if present
-            if cleaned.startswith('```'):
-                cleaned = cleaned.split('```')[1]
-                if cleaned.startswith('json'):
-                    cleaned = cleaned[4:]
-                cleaned = cleaned.split('```')[0].strip()
-
-            json.loads(cleaned)
-            logger.debug("Response format validation: JSON is valid ✓")
-            return True
-        except json.JSONDecodeError as e:
-            logger.warning(f"Response format validation failed: Invalid JSON at position {e.pos}")
+        # Check for JSON or code blocks (bad format)
+        if "{" in cleaned and "}" in cleaned:
+            logger.warning("Response contains JSON formatting - should be plain text")
             return False
+
+        if "```" in cleaned:
+            logger.warning("Response contains markdown code blocks - should be plain text")
+            return False
+
+        # Ensure response is not empty
+        if len(cleaned) < 5:
+            logger.warning("Response is too short or empty")
+            return False
+
+        # Check for ANSWER: marker (best case) or generic text content (acceptable)
+        if "ANSWER:" not in cleaned and len(cleaned) > 200:
+            logger.debug("Response doesn't have ANSWER: marker but has sufficient content")
+
+        logger.debug("Response format validation: Plain text format ✓")
+        return True
 
     @log_execution_time(logger)
     def _parse_response(self, response: str) -> tuple:
-        """Parse LLM response into answer and reasoning with validation."""
-        import json
-
+        """Parse LLM response in format: ANSWER: ... REASONING: ..."""
         try:
-            # Remove markdown code blocks if present (Issue 1 fix)
             cleaned = response.strip()
-            if cleaned.startswith('```'):
-                cleaned = cleaned.split('```')[1]
-                if cleaned.startswith('json'):
-                    cleaned = cleaned[4:]
-                cleaned = cleaned.split('```')[0].strip()
 
-            # Parse JSON
-            parsed = json.loads(cleaned)
-            answer = parsed.get("answer", response).strip()
-            reasoning = parsed.get("reasoning", "").strip()
+            # Remove any JSON/code blocks if LLM accidentally included them
+            cleaned = self._remove_json_blocks(cleaned)
 
-            # Validate answer is not too vague (Issue 3 fix)
-            answer = self._fix_vague_answer(answer, reasoning)
+            answer = ""
+            reasoning = ""
 
-            # Ensure reasoning has proper structure (Issue 2 fix)
-            reasoning = self._format_reasoning(reasoning)
+            # Split on ANSWER: and REASONING: markers
+            if "ANSWER:" in cleaned and "REASONING:" in cleaned:
+                # Both sections present
+                answer_part = cleaned.split("ANSWER:", 1)[1].split("REASONING:", 1)[0].strip()
+                reasoning_part = cleaned.split("REASONING:", 1)[1].strip()
+                answer = answer_part
+                reasoning = reasoning_part
+            elif "ANSWER:" in cleaned:
+                # Only ANSWER section
+                answer = cleaned.split("ANSWER:", 1)[1].strip()
+                reasoning = ""
+            else:
+                # No markers found, treat entire response as answer
+                answer = cleaned
+                reasoning = ""
+
+            # Remove duplicates from answer
+            answer = self._remove_duplicates(answer)
+
+            # Ensure answer is not too vague
+            answer = self._ensure_complete_answer(answer)
+
+            # Ensure reasoning has proper structure
+            if reasoning:
+                reasoning = self._format_reasoning(reasoning)
 
             logger.debug(f"Response parsed | answer_len={len(answer)}, reasoning_len={len(reasoning)}")
             return answer, reasoning
-        except (json.JSONDecodeError, ValueError, AttributeError) as e:
+        except Exception as e:
             # Fallback: return full response as answer
-            logger.debug(f"Failed to parse JSON: {str(e)}, returning full response as answer")
+            logger.debug(f"Failed to parse response: {str(e)}, returning full response as answer")
             return response.strip(), ""
 
-    def _fix_vague_answer(self, answer: str, reasoning: str) -> str:
-        """Fix Issue 3: Move details from reasoning block to answer if answer is too vague."""
-        # If answer is just intro/preamble (starts with generic words), move reasoning details to answer
+    def _remove_json_blocks(self, text: str) -> str:
+        """Remove JSON code blocks from response if LLM included them."""
+        cleaned = text.strip()
+
+        # Remove markdown code blocks
+        if cleaned.startswith('```'):
+            try:
+                parts = cleaned.split('```')
+                if len(parts) >= 3:
+                    # Extract content between backticks
+                    content = parts[1]
+                    if content.startswith('json'):
+                        content = content[4:]
+                    cleaned = content.strip()
+            except Exception as e:
+                logger.debug(f"Failed to remove code blocks: {e}")
+
+        return cleaned
+
+    def _remove_duplicates(self, text: str) -> str:
+        """Remove duplicate sentences/blocks from response."""
+        lines = text.split('\n')
+        seen = set()
+        unique_lines = []
+
+        for line in lines:
+            line_stripped = line.strip()
+            if line_stripped and line_stripped not in seen:
+                seen.add(line_stripped)
+                unique_lines.append(line)
+            elif not line_stripped:
+                # Keep empty lines for formatting
+                unique_lines.append(line)
+
+        return '\n'.join(unique_lines).strip()
+
+    def _ensure_complete_answer(self, answer: str) -> str:
+        """Ensure answer is complete and not just a vague intro."""
+        if not answer:
+            return answer
+
+        # Check if answer starts with a vague intro
         vague_starters = [
             "for ", "several ", "many ", "some ", "various ",
-            "this ", "in ", "on ", "at ", "by ", "with "
+            "this ", "in ", "on ", "at ", "by ", "with ",
+            "it ", "there ", "you can"
         ]
 
-        is_vague = (
-            answer and
+        is_vague_intro = (
             answer[0].islower() and
             any(answer.lower().startswith(starter) for starter in vague_starters) and
-            len(answer) < 150  # Short generic intro
+            len(answer) < 150
         )
 
-        if is_vague and reasoning and len(reasoning) > 200:
-            logger.debug("Answer too vague, promoting details from reasoning to answer")
-            # Move reasoning to answer if answer is incomplete
-            return reasoning.strip() if reasoning else answer
+        if is_vague_intro:
+            logger.debug(f"Answer detected as vague intro only, flagging for improvement")
+            # Return as-is, but log it - the LLM should have provided better answer
+            return answer
 
         return answer
 
@@ -297,10 +337,9 @@ Start your response with {{ and end with }}"""
 
     @log_execution_time(logger)
     def _process_success(self, req: QueryRequest, answer: str, reasoning: str) -> QueryResponse:
-        """Process successful query."""
-        formatted_answer = answer
-        if reasoning:
-            formatted_answer += f"\n\nReasoning:\n{reasoning}"
+        """Process successful query and format for HTML display."""
+        # Format answer as HTML (inner HTML only, per CLAUDE.md)
+        formatted_answer = self._format_as_html(answer, reasoning)
 
         logger.debug(f"Saving successful query to DB")
         conversation_id, bot_msg = ConversationService.save_exchange(
@@ -322,6 +361,39 @@ Start your response with {{ and end with }}"""
             response_time=0,
             created_at=bot_msg.created_at.isoformat(),
         )
+
+    def _format_as_html(self, answer: str, reasoning: str) -> str:
+        """Format answer and reasoning as HTML for database storage."""
+        html_parts = []
+
+        # Add answer paragraph
+        if answer:
+            html_parts.append(f"<p>{answer}</p>")
+
+        # Add reasoning as a separate section if it exists
+        if reasoning:
+            # Format reasoning with proper HTML
+            reasoning_html = self._format_reasoning_html(reasoning)
+            html_parts.append(f"<p><strong>Reasoning:</strong></p>{reasoning_html}")
+
+        return "".join(html_parts) if html_parts else "<p>No response generated.</p>"
+
+    def _format_reasoning_html(self, reasoning: str) -> str:
+        """Convert plain text reasoning to HTML list format."""
+        lines = reasoning.split('\n')
+        html_lines = []
+
+        for line in lines:
+            line = line.strip()
+            if line and line[0].isdigit() and '.' in line[:3]:
+                # Already numbered, wrap in li
+                html_lines.append(f"<li>{line[2:].strip()}</li>")
+            elif line:
+                html_lines.append(f"<li>{line}</li>")
+
+        if html_lines:
+            return f"<ol>{''.join(html_lines)}</ol>"
+        return f"<p>{reasoning}</p>"
 
     @log_execution_time(logger)
     def _process_error(self, req: QueryRequest, error: str) -> QueryResponse:
