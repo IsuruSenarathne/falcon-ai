@@ -52,24 +52,42 @@ class RAGService:
         logger.info("RAG Service initialized successfully")
 
     def _get_prompt_template(self) -> str:
-        """Get the prompt template for LLM."""
+        """Get the prompt template for LLM with improved structure."""
         return """Use the following context to answer the question.
+
 Context:
 {context}
 
 Question:
 {question}
 
-MANDATORY RESPONSE FORMAT:
-1. Use response format with "answer" and "reasoning" fields
-2. Your answer should be detailed and comprehensive
-3. for the response follow the format of {{ "answer": "...", "reasoning": "..." }}
-4. Always follow the response format strictly - do not include any explanations outside of the JSON structure
-5. Do not include any other characters other than the proper format.
+=== MANDATORY RESPONSE FORMAT ===
+Return ONLY valid JSON, nothing else. No markdown, no code blocks, no explanations.
 
-RULES:
-- Never include markdown code blocks or backticks, only raw JSON
-"""
+Format:
+{{"answer": "...", "reasoning": "..."}}
+
+=== ANSWER REQUIREMENTS ===
+- Include ALL specific details, names, numbers, examples
+- For lists/multiple items: list them with numbers or bullet points within the answer
+- Be comprehensive and detailed in the answer field
+- Never put important details only in reasoning
+
+=== REASONING REQUIREMENTS ===
+- Show step-by-step logic numbered as: 1. ... 2. ... 3. ...
+- Explain WHY the answer is correct
+- Keep reasoning concise but complete
+- Only include reasoning if question asks for explanation
+
+=== STRICT RULES ===
+1. ONLY output valid JSON - no other text
+2. Never use markdown backticks or code blocks
+3. Both fields must be non-empty strings
+4. Answer must contain all specific information (no vague intro)
+5. Do not put details in reasoning that belong in answer
+6. Double-check JSON is valid before responding
+
+Start your response with {{ and end with }}"""
 
     @log_service_call(logger)
     @log_errors(logger)
@@ -134,6 +152,9 @@ RULES:
             # Validate response uses context
             self._validate_context_usage(context, response, req.question)
 
+            # Validate response format (Issue 1 check)
+            self._validate_response_format(response)
+
             # Parse and save
             answer, reasoning = self._parse_response(response)
             result = self._process_success(req, answer, reasoning)
@@ -173,13 +194,42 @@ RULES:
 
         return True
 
+    def _validate_response_format(self, response: str) -> bool:
+        """Validate response format (Issue 1 detection and logging).
+
+        Returns True if format is valid, logs warnings if not.
+        """
+        import json
+
+        cleaned = response.strip()
+
+        # Check for markdown code blocks (bad format)
+        if "```" in cleaned and "{" in cleaned:
+            logger.warning("Response contains markdown code blocks with JSON - format may be malformed")
+
+        # Check if response is valid JSON
+        try:
+            # Remove markdown if present
+            if cleaned.startswith('```'):
+                cleaned = cleaned.split('```')[1]
+                if cleaned.startswith('json'):
+                    cleaned = cleaned[4:]
+                cleaned = cleaned.split('```')[0].strip()
+
+            json.loads(cleaned)
+            logger.debug("Response format validation: JSON is valid ✓")
+            return True
+        except json.JSONDecodeError as e:
+            logger.warning(f"Response format validation failed: Invalid JSON at position {e.pos}")
+            return False
+
     @log_execution_time(logger)
     def _parse_response(self, response: str) -> tuple:
-        """Parse LLM response into answer and reasoning."""
+        """Parse LLM response into answer and reasoning with validation."""
         import json
 
         try:
-            # Remove markdown code blocks if present
+            # Remove markdown code blocks if present (Issue 1 fix)
             cleaned = response.strip()
             if cleaned.startswith('```'):
                 cleaned = cleaned.split('```')[1]
@@ -192,12 +242,58 @@ RULES:
             answer = parsed.get("answer", response).strip()
             reasoning = parsed.get("reasoning", "").strip()
 
+            # Validate answer is not too vague (Issue 3 fix)
+            answer = self._fix_vague_answer(answer, reasoning)
+
+            # Ensure reasoning has proper structure (Issue 2 fix)
+            reasoning = self._format_reasoning(reasoning)
+
             logger.debug(f"Response parsed | answer_len={len(answer)}, reasoning_len={len(reasoning)}")
             return answer, reasoning
-        except (json.JSONDecodeError, ValueError, AttributeError):
+        except (json.JSONDecodeError, ValueError, AttributeError) as e:
             # Fallback: return full response as answer
-            logger.debug("Failed to parse JSON, returning full response as answer")
+            logger.debug(f"Failed to parse JSON: {str(e)}, returning full response as answer")
             return response.strip(), ""
+
+    def _fix_vague_answer(self, answer: str, reasoning: str) -> str:
+        """Fix Issue 3: Move details from reasoning block to answer if answer is too vague."""
+        # If answer is just intro/preamble (starts with generic words), move reasoning details to answer
+        vague_starters = [
+            "for ", "several ", "many ", "some ", "various ",
+            "this ", "in ", "on ", "at ", "by ", "with "
+        ]
+
+        is_vague = (
+            answer and
+            answer[0].islower() and
+            any(answer.lower().startswith(starter) for starter in vague_starters) and
+            len(answer) < 150  # Short generic intro
+        )
+
+        if is_vague and reasoning and len(reasoning) > 200:
+            logger.debug("Answer too vague, promoting details from reasoning to answer")
+            # Move reasoning to answer if answer is incomplete
+            return reasoning.strip() if reasoning else answer
+
+        return answer
+
+    def _format_reasoning(self, reasoning: str) -> str:
+        """Ensure reasoning has proper numbered steps (Issue 2 fix)."""
+        if not reasoning:
+            return reasoning
+
+        # Check if reasoning already has numbered steps
+        if any(f"{i}." in reasoning for i in range(1, 5)):
+            return reasoning
+
+        # If reasoning exists but has no structure, try to add numbering
+        sentences = [s.strip() for s in reasoning.split('.') if s.strip()]
+        if len(sentences) > 1:
+            numbered = "\n".join([f"{i+1}. {s.strip()}" for i, s in enumerate(sentences[:5])])
+            logger.debug(f"Restructured reasoning with numbered steps")
+            return numbered
+
+        return reasoning
 
     @log_execution_time(logger)
     def _process_success(self, req: QueryRequest, answer: str, reasoning: str) -> QueryResponse:
