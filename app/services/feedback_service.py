@@ -16,6 +16,7 @@ class FeedbackService:
         user_question: str,
         bot_answer: str,
         is_positive: bool,
+        reason: str = None,
     ) -> Feedback:
         db = SessionLocal()
         try:
@@ -27,6 +28,7 @@ class FeedbackService:
                 user_question=user_question,
                 bot_answer=bot_answer,
                 is_positive=is_positive,
+                reason=reason,
             )
             db.commit()
             db.refresh(feedback)

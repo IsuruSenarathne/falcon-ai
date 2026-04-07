@@ -24,6 +24,7 @@ def submit_feedback():
         user_question = data.get("user_question", "").strip()
         bot_answer = data.get("bot_answer", "").strip()
         is_positive = data.get("is_positive")
+        reason = data.get("reason", "").strip() if data.get("reason") else None
 
         if not isinstance(is_positive, bool):
             return jsonify({"error": "'is_positive' must be a boolean"}), 400
@@ -31,7 +32,7 @@ def submit_feedback():
         if not conversation_id or not user_msg_id or not bot_msg_id:
             return jsonify({"error": "conversation_id, user_msg_id, and bot_msg_id cannot be empty"}), 400
 
-        logger.info(f"Submitting feedback | conversation_id={conversation_id}, user_msg_id={user_msg_id}, bot_msg_id={bot_msg_id}, is_positive={is_positive}")
+        logger.info(f"Submitting feedback | conversation_id={conversation_id}, user_msg_id={user_msg_id}, bot_msg_id={bot_msg_id}, is_positive={is_positive}, reason={reason}")
 
         feedback = FeedbackService.save_feedback(
             conversation_id=conversation_id,
@@ -40,6 +41,7 @@ def submit_feedback():
             user_question=user_question,
             bot_answer=bot_answer,
             is_positive=is_positive,
+            reason=reason,
         )
 
         logger.info(f"Feedback saved | feedback_id={feedback.feedback_id}")
@@ -78,6 +80,7 @@ def get_feedback(feedback_id: str):
                 "user_question": feedback.user_question,
                 "bot_answer": feedback.bot_answer,
                 "is_positive": feedback.is_positive,
+                "reason": feedback.reason,
                 "created_at": feedback.created_at.isoformat() if feedback.created_at else None,
             }
         }), 200
@@ -116,6 +119,7 @@ def get_conversation_feedback(conversation_id: str):
                     "user_question": f.user_question,
                     "bot_answer": f.bot_answer,
                     "is_positive": f.is_positive,
+                    "reason": f.reason,
                     "created_at": f.created_at.isoformat() if f.created_at else None,
                 }
                 for f in feedbacks

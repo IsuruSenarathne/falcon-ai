@@ -19,6 +19,7 @@ class Feedback(Base):
     user_question = Column(Text, nullable=False)
     bot_answer = Column(Text, nullable=False)
     is_positive = Column(Boolean, nullable=False, index=True)
+    reason = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     conversation = relationship("Conversation")
