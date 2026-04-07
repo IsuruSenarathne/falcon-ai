@@ -53,30 +53,16 @@ class RAGService:
 
     def _get_prompt_template(self) -> str:
         """Get the prompt template for LLM with improved structure."""
-        return """Use the following context to answer the question thoroughly and accurately.
-
-Context:
+        return """Context:
 {context}
 
-Question:
-{question}
+Question: {question}
 
-=== STRICT RESPONSE FORMAT ===
-You MUST follow this exact format with no variations:
+Respond using ONLY this exact structure (no other text before or after):
 
-ANSWER: [Your complete answer with all specific details, numbers, names, examples]
+ANSWER: [inner HTML using <p>, <ul><li>, <ol><li>, or <table><thead><tr><th/></tr></thead><tbody><tr><td/></tr></tbody></table> - every table row must have <tr>]
 
-REASONING: [Step-by-step explanation numbered as 1. ... 2. ... 3. ... Only include if question needs explanation]
-
-=== REQUIREMENTS ===
-- Do NOT include "ANSWER:" or "REASONING:" labels in the content - only as section headers
-- NEVER output JSON, code blocks, or markdown formatting
-- NEVER include duplicate information
-- Answer must be a complete statement with all specific details (no vague intros)
-- If answer is a list: use comma-separated items or numbered bullets
-- Keep all important details in ANSWER section
-- Number reasoning steps: 1. ... 2. ... 3. ...
-- Reasoning can be omitted if question doesn't require explanation"""
+REASONING: [numbered plain text steps: 1. ... 2. ... 3. ...]"""
 
     @log_service_call(logger)
     @log_errors(logger)
@@ -184,19 +170,21 @@ REASONING: [Step-by-step explanation numbered as 1. ... 2. ... 3. ... Only inclu
         return True
 
     def _validate_response_format(self, response: str) -> bool:
-        """Validate response format follows ANSWER: ... REASONING: ... structure.
+        """Validate response format follows ANSWER: (HTML) ... REASONING: (plain) ... structure.
 
         Returns True if format is valid, logs warnings if not.
         """
         cleaned = response.strip()
 
-        # Check for JSON or code blocks (bad format)
-        if "{" in cleaned and "}" in cleaned:
-            logger.warning("Response contains JSON formatting - should be plain text")
+        # Check for JSON objects (bad format) - but not HTML
+        import re
+        has_json = bool(re.search(r'\{\s*"[^"]+"\s*:', cleaned))
+        if has_json:
+            logger.warning("Response contains JSON formatting - should be HTML answer with plain text reasoning")
             return False
 
         if "```" in cleaned:
-            logger.warning("Response contains markdown code blocks - should be plain text")
+            logger.warning("Response contains markdown code blocks - answer should be HTML")
             return False
 
         # Ensure response is not empty
@@ -204,57 +192,99 @@ REASONING: [Step-by-step explanation numbered as 1. ... 2. ... 3. ... Only inclu
             logger.warning("Response is too short or empty")
             return False
 
-        # Check for ANSWER: marker (best case) or generic text content (acceptable)
-        if "ANSWER:" not in cleaned and len(cleaned) > 200:
-            logger.debug("Response doesn't have ANSWER: marker but has sufficient content")
+        if not re.search(r'(?i)ANSWER\s*:', cleaned):
+            logger.warning("Response missing ANSWER: section header")
 
-        logger.debug("Response format validation: Plain text format ✓")
+        logger.debug("Response format validation passed")
         return True
 
     @log_execution_time(logger)
     def _parse_response(self, response: str) -> tuple:
-        """Parse LLM response in format: ANSWER: ... REASONING: ..."""
+        """Parse LLM response. Expects ANSWER: ... REASONING: ... but handles model deviations."""
+        import re
+
         try:
             cleaned = response.strip()
-
-            # Remove any JSON/code blocks if LLM accidentally included them
             cleaned = self._remove_json_blocks(cleaned)
 
             answer = ""
             reasoning = ""
 
-            # Split on ANSWER: and REASONING: markers
-            if "ANSWER:" in cleaned and "REASONING:" in cleaned:
-                # Both sections present
-                answer_part = cleaned.split("ANSWER:", 1)[1].split("REASONING:", 1)[0].strip()
-                reasoning_part = cleaned.split("REASONING:", 1)[1].strip()
-                answer = answer_part
-                reasoning = reasoning_part
-            elif "ANSWER:" in cleaned:
-                # Only ANSWER section
-                answer = cleaned.split("ANSWER:", 1)[1].strip()
+            # Case-insensitive match for ANSWER: and REASONING: markers
+            answer_match = re.search(r'(?i)ANSWER\s*:', cleaned)
+            reasoning_match = re.search(r'(?i)REASONING\s*:', cleaned)
+
+            if answer_match and reasoning_match:
+                answer = cleaned[answer_match.end():reasoning_match.start()].strip()
+                reasoning = cleaned[reasoning_match.end():].strip()
+            elif answer_match:
+                answer = cleaned[answer_match.end():].strip()
                 reasoning = ""
             else:
-                # No markers found, treat entire response as answer
-                answer = cleaned
-                reasoning = ""
+                # Model ignored markers — extract HTML as answer, numbered list as reasoning
+                logger.warning("Model did not follow ANSWER:/REASONING: format, attempting fallback extraction")
+                answer, reasoning = self._fallback_extract(cleaned)
 
-            # Remove duplicates from answer
+            # Repair common HTML issues (e.g. missing <tr> in tables)
+            answer = self._repair_html(answer)
+
+            # Remove duplicates
             answer = self._remove_duplicates(answer)
 
-            # Ensure answer is not too vague
-            answer = self._ensure_complete_answer(answer)
-
-            # Ensure reasoning has proper structure
             if reasoning:
                 reasoning = self._format_reasoning(reasoning)
 
             logger.debug(f"Response parsed | answer_len={len(answer)}, reasoning_len={len(reasoning)}")
             return answer, reasoning
         except Exception as e:
-            # Fallback: return full response as answer
             logger.debug(f"Failed to parse response: {str(e)}, returning full response as answer")
             return response.strip(), ""
+
+    def _fallback_extract(self, text: str) -> tuple:
+        """Fallback: extract HTML blocks as answer and numbered steps as reasoning."""
+        import re
+
+        # Extract all HTML content
+        html_blocks = re.findall(r'<[^>]+>.*?</[^>]+>', text, re.DOTALL)
+        if html_blocks:
+            answer = "".join(html_blocks)
+        else:
+            # No HTML - strip prose preamble (sentences before any useful content)
+            answer = text
+
+        # Extract numbered steps as reasoning (lines starting with digit.)
+        numbered_lines = re.findall(r'^\s*\d+\.\s+.+', text, re.MULTILINE)
+        reasoning = "\n".join(numbered_lines) if numbered_lines else ""
+
+        # If no numbered steps found, build a minimal reasoning
+        if not reasoning:
+            reasoning = "1. Retrieved relevant information from context.\n2. Formatted the answer based on the question."
+
+        return answer, reasoning
+
+    def _repair_html(self, html: str) -> str:
+        """Fix common LLM HTML mistakes, especially missing <tr> wrappers in tables."""
+        import re
+
+        def fix_tbody(match):
+            tbody_content = match.group(1)
+            # If <td> exists without a wrapping <tr>, group them into rows
+            if '<td>' in tbody_content and '<tr>' not in tbody_content:
+                tds = re.findall(r'<td>.*?</td>', tbody_content, re.DOTALL)
+                # Detect column count from <thead>
+                th_count = len(re.findall(r'<th>', html))
+                cols = th_count if th_count > 0 else 2
+
+                rows = []
+                for i in range(0, len(tds), cols):
+                    row_cells = tds[i:i + cols]
+                    rows.append(f"<tr>{''.join(row_cells)}</tr>")
+                return f"<tbody>{''.join(rows)}</tbody>"
+            return match.group(0)
+
+        # Fix tbody missing <tr> wrappers
+        html = re.sub(r'<tbody>(.*?)</tbody>', fix_tbody, html, flags=re.DOTALL)
+        return html
 
     def _remove_json_blocks(self, text: str) -> str:
         """Remove JSON code blocks from response if LLM included them."""
@@ -337,14 +367,14 @@ REASONING: [Step-by-step explanation numbered as 1. ... 2. ... 3. ... Only inclu
 
     @log_execution_time(logger)
     def _process_success(self, req: QueryRequest, answer: str, reasoning: str) -> QueryResponse:
-        """Process successful query and format for HTML display."""
-        # Format answer as HTML (inner HTML only, per CLAUDE.md)
-        formatted_answer = self._format_as_html(answer, reasoning)
+        """Process successful query. Answer is already HTML from LLM."""
+        # Combine answer (HTML) + reasoning (plain text converted to HTML) for DB storage
+        db_answer = self._combine_for_storage(answer, reasoning)
 
         logger.debug(f"Saving successful query to DB")
         conversation_id, bot_msg = ConversationService.save_exchange(
             question=req.question,
-            answer=formatted_answer,
+            answer=db_answer,
             status=MessageStatus.SUCCESS,
             user_id=req.user_id,
             session_id=req.session_id,
@@ -355,44 +385,39 @@ REASONING: [Step-by-step explanation numbered as 1. ... 2. ... 3. ... Only inclu
         return QueryResponse(
             conversation_id=conversation_id,
             question=req.question,
-            answer=answer,
+            answer=answer,           # HTML answer sent in response
             reasoning=reasoning if reasoning else None,
             status="success",
             response_time=0,
             created_at=bot_msg.created_at.isoformat(),
         )
 
-    def _format_as_html(self, answer: str, reasoning: str) -> str:
-        """Format answer and reasoning as HTML for database storage."""
-        html_parts = []
+    def _combine_for_storage(self, answer: str, reasoning: str) -> str:
+        """Combine HTML answer and plain text reasoning for DB storage."""
+        parts = []
 
-        # Add answer paragraph
         if answer:
-            html_parts.append(f"<p>{answer}</p>")
+            parts.append(answer)  # already HTML
 
-        # Add reasoning as a separate section if it exists
         if reasoning:
-            # Format reasoning with proper HTML
-            reasoning_html = self._format_reasoning_html(reasoning)
-            html_parts.append(f"<p><strong>Reasoning:</strong></p>{reasoning_html}")
+            reasoning_html = self._reasoning_to_html(reasoning)
+            parts.append(f"<p><strong>Reasoning:</strong></p>{reasoning_html}")
 
-        return "".join(html_parts) if html_parts else "<p>No response generated.</p>"
+        return "".join(parts) if parts else "<p>No response generated.</p>"
 
-    def _format_reasoning_html(self, reasoning: str) -> str:
-        """Convert plain text reasoning to HTML list format."""
-        lines = reasoning.split('\n')
-        html_lines = []
+    def _reasoning_to_html(self, reasoning: str) -> str:
+        """Convert plain text numbered reasoning to HTML ordered list."""
+        lines = [line.strip() for line in reasoning.split('\n') if line.strip()]
+        items = []
 
         for line in lines:
-            line = line.strip()
             if line and line[0].isdigit() and '.' in line[:3]:
-                # Already numbered, wrap in li
-                html_lines.append(f"<li>{line[2:].strip()}</li>")
-            elif line:
-                html_lines.append(f"<li>{line}</li>")
+                items.append(f"<li>{line[line.index('.')+1:].strip()}</li>")
+            else:
+                items.append(f"<li>{line}</li>")
 
-        if html_lines:
-            return f"<ol>{''.join(html_lines)}</ol>"
+        if items:
+            return f"<ol>{''.join(items)}</ol>"
         return f"<p>{reasoning}</p>"
 
     @log_execution_time(logger)
