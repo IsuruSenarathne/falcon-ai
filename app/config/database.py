@@ -30,6 +30,7 @@ Base = declarative_base()
 
 def init_db() -> None:
     from app.models.conversation import Conversation, Message  # noqa: F401 — registers models with Base
+    from app.models.feedback import Feedback  # noqa: F401 — registers model with Base
     try:
         Base.metadata.create_all(bind=engine)
         print(f"✓ Database initialized at {DB_HOST}:{DB_PORT}/{DB_NAME}")
