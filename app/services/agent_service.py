@@ -8,7 +8,10 @@ from app.dto.conversation_dto import QueryRequest, QueryResponse
 from app.models.conversation import MessageStatus
 from app.services.conversation_service import ConversationService
 from app.utils.logger import get_logger
-from langgraph.checkpoint.memory import InMemorySaver  
+import pymysql
+from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver
+from app.config.database import DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME
+
 
 logger = get_logger(__name__)
 
@@ -43,12 +46,23 @@ class AgentService:
         logger.info(f"Initializing AgentService | model={model}")
         llm = ChatOllama(model=model, temperature=temperature)
 
+        conn = pymysql.connect(
+            host=DB_HOST,
+            port=int(DB_PORT),
+            user=DB_USER,
+            password=DB_PASSWORD,
+            database=DB_NAME,
+            autocommit=True,
+        )
+        checkpointer = PyMySQLSaver(conn)
+        checkpointer.setup()
+
         self.agent = create_agent(
             model=llm,
             tools=[web_search, knowledge_base_search],
             response_format=AgentResponse,
             system_prompt=SYSTEM_PROMPT,
-            checkpointer=InMemorySaver()
+            checkpointer=checkpointer
         )
         logger.info("AgentService initialized successfully")
 
