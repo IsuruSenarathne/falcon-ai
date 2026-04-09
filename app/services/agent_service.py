@@ -1,6 +1,7 @@
 """Agent service using LangChain create_agent with tool calling and structured output."""
 from pydantic import BaseModel, Field
 from langchain.agents import create_agent
+from langchain.messages import SystemMessage #type: ignore
 from langchain_ollama import ChatOllama
 from app.tools import web_search, knowledge_base_search
 from app.constants.models import LLM_MAIN_MODEL
@@ -15,7 +16,8 @@ from langchain_core.runnables import RunnableConfig # type: ignore
 
 logger = get_logger(__name__)
 
-SYSTEM_PROMPT = """You are a helpful university assistant.
+SYSTEM_PROMPT = SystemMessage(
+    content="""You are a helpful university assistant.
 Use the available tools to retrieve information, then answer the user's question.
 
 IMPORTANT: Always format your response as HTML using these elements:
@@ -26,7 +28,7 @@ IMPORTANT: Always format your response as HTML using these elements:
 - <strong> for emphasis on labels or headings
 - <br> for line breaks when needed
 
-Never return plain text. Always wrap content in appropriate HTML tags."""
+Never return plain text. Always wrap content in appropriate HTML tags.""")
 
 
 class AgentResponse(BaseModel):
