@@ -8,7 +8,7 @@ from app.dto.conversation_dto import QueryRequest, QueryResponse
 from app.models.conversation import MessageStatus
 from app.services.conversation_service import ConversationService
 from app.utils.logger import get_logger
-from app.middleware.middleware import trim_messages
+from app.middleware.middleware import trim_messages, handle_tool_errors
 from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver # type: ignore
 from app.config.pymysql import get_pymysql_conn
 from langchain_core.runnables import RunnableConfig # type: ignore
@@ -55,7 +55,7 @@ class AgentService:
             response_format=AgentResponse,
             system_prompt=SYSTEM_PROMPT,
             checkpointer=checkpointer,
-            middleware=[trim_messages],
+            middleware=[trim_messages, handle_tool_errors],
         )
         logger.info("AgentService initialized successfully")
 
