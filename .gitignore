@@ -1,4 +1,5 @@
 .env
+.venvagent
 langchain-env
 
 # ChromaDB vector stores

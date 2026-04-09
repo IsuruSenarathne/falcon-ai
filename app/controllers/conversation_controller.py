@@ -31,7 +31,7 @@ def query():
         logger.debug(f"Question: {question[:50]}...")
 
         req = QueryRequest.from_json(data)
-        result = current_app.rag_service.query(req)
+        result = current_app.agent_service.query(req)
 
         logger.info(f"Query result | status={result.status}")
 
@@ -58,7 +58,7 @@ def create_conversation():
 
         session_data = {**data, "session_id": session_id}
         req = QueryRequest.from_json(session_data)
-        result = current_app.rag_service.query(req)
+        result = current_app.agent_service.query(req)
 
         logger.info(f"Conversation created | id={result.conversation_id}")
         status_code = 200 if result.status == "success" else 400
@@ -159,7 +159,7 @@ def messages(conversation_id: str):
         logger.debug(f"Adding message to conversation | conversation_id={conversation_id}")
         session_data = {**data, "session_id": conversation_id}
         req = QueryRequest.from_json(session_data)
-        result = current_app.rag_service.query(req)
+        result = current_app.agent_service.query(req)
 
         logger.info(f"Message added | conversation_id={conversation_id}, status={result.status}")
         status_code = 200 if result.status == "success" else 400
