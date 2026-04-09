@@ -8,7 +8,7 @@ from app.dto.conversation_dto import QueryRequest, QueryResponse
 from app.models.conversation import MessageStatus
 from app.services.conversation_service import ConversationService
 from app.utils.logger import get_logger
-from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver
+from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver # type: ignore
 from app.config.pymysql import get_pymysql_conn
 
 
