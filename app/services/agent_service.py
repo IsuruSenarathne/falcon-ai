@@ -8,9 +8,10 @@ from app.dto.conversation_dto import QueryRequest, QueryResponse
 from app.models.conversation import MessageStatus
 from app.services.conversation_service import ConversationService
 from app.utils.logger import get_logger
+from app.middleware.middleware import trim_messages
 from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver # type: ignore
 from app.config.pymysql import get_pymysql_conn
-
+from langchain_core.runnables import RunnableConfig # type: ignore
 
 logger = get_logger(__name__)
 
@@ -53,7 +54,8 @@ class AgentService:
             tools=[web_search, knowledge_base_search],
             response_format=AgentResponse,
             system_prompt=SYSTEM_PROMPT,
-            checkpointer=checkpointer
+            checkpointer=checkpointer,
+            middleware=[trim_messages],
         )
         logger.info("AgentService initialized successfully")
 
@@ -65,12 +67,11 @@ class AgentService:
             context_type: Hint for tool selection — "web_search", "datasource", or "default"
             thread_id: Conversation ID used to scope memory checkpointing
         """
+        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
         message = self._build_message(question, context_type)
         logger.info(f"Agent invoke | context_type={context_type} | thread_id={thread_id} | question={question[:60]}")
 
-        result = self.agent.invoke({
-            "messages": [{"role": "user", "content": message}]
-        }, { "configurable": { "thread_id": thread_id } })
+        result = self.agent.invoke({ "messages": [{"role": "user", "content": message}]}, config)
 
         structured: AgentResponse = result.get("structured_response")
         if structured:
