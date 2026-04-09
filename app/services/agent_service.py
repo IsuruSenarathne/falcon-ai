@@ -12,16 +12,9 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 SYSTEM_PROMPT = """You are a helpful university assistant.
+answer the user's question using tools.
 
-You have access to two tools:
-- web_search: use for current, real-time, or general internet information
-- knowledge_base_search: use for university-specific information (courses, advisors, departments, modules)
-
-Always use a tool to retrieve relevant information before answering.
-
-Respond in this exact structure:
-ANSWER: [inner HTML using <p>, <ul><li>, <ol><li>, or <table><thead><tr><th/></tr></thead><tbody><tr><td/></tr></tbody></table>]
-REASONING: [numbered plain text steps: 1. ... 2. ... 3. ...]"""
+"""
 
 
 class AgentResponse(BaseModel):
@@ -30,7 +23,7 @@ class AgentResponse(BaseModel):
         description="HTML formatted answer using <p>, <ul><li>, <ol><li>, or <table> tags"
     )
     reasoning: str = Field(
-        description="Numbered plain text steps explaining the reasoning: 1. ... 2. ... 3. ..."
+        description="your reasoning here..."
     )
 
 
@@ -68,8 +61,12 @@ class AgentService:
             logger.debug(f"Structured response received | answer_len={len(structured.answer)}")
             return structured.answer, structured.reasoning
 
-        logger.warning("Agent returned no structured_response — falling back to empty strings")
-        return "", ""
+        logger.warning("No structured_response — extracting from messages")
+        messages = result.get("messages", [])
+        for msg in reversed(messages):
+            if hasattr(msg, "content") and msg.content and getattr(msg, "type", "") != "tool":
+                return f"<p>{msg.content}</p>", ""
+        return "<p>No response generated.</p>", ""
 
     def query(self, req: QueryRequest) -> QueryResponse:
         """Entry point for controllers — runs the agent and persists the exchange to DB."""
