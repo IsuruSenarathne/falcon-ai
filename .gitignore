@@ -1,6 +1,8 @@
 .env
-.venvagent
+.appenv
+*.pyc
 langchain-env
+chroma_db/chroma.sqlite3
 
 # ChromaDB vector stores
 app2/chroma_db/*

@@ -12,18 +12,26 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 SYSTEM_PROMPT = """You are a helpful university assistant.
-answer the user's question using tools.
+Use the available tools to retrieve information, then answer the user's question.
 
-"""
+IMPORTANT: Always format your response as HTML using these elements:
+- <p> for paragraphs
+- <ul><li> for unordered lists
+- <ol><li> for ordered/numbered lists
+- <table><thead><tr><th></th></tr></thead><tbody><tr><td></td></tr></tbody></table> for tabular data like course listings
+- <strong> for emphasis on labels or headings
+- <br> for line breaks when needed
+
+Never return plain text. Always wrap content in appropriate HTML tags."""
 
 
 class AgentResponse(BaseModel):
     """Structured output returned by the agent."""
     answer: str = Field(
-        description="HTML formatted answer using <p>, <ul><li>, <ol><li>, or <table> tags"
+        description="Answer formatted as HTML. Use <p>, <ul><li>, <ol><li>, <table> tags. For course/module data use a <table>. Never return plain text."
     )
     reasoning: str = Field(
-        description="your reasoning here..."
+        description="Brief explanation of how you arrived at the answer."
     )
 
 
