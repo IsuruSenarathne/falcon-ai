@@ -1,4 +1,5 @@
 """Agent service using LangChain create_agent with tool calling and structured output."""
+from langchain.schema import HumanMessage
 from pydantic import BaseModel, Field
 from langchain.agents import create_agent
 from langchain.messages import SystemMessage #type: ignore
@@ -73,7 +74,7 @@ class AgentService:
         message = self._build_message(question, context_type)
         logger.info(f"Agent invoke | context_type={context_type} | thread_id={thread_id} | question={question[:60]}")
 
-        result = self.agent.invoke({ "messages": [{"role": "user", "content": message}]}, config)
+        result = self.agent.invoke({ "messages": [{"role": "user", "content": HumanMessage(message)}]}, config)
 
         structured: AgentResponse = result.get("structured_response")
         if structured:
