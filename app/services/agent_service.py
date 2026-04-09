@@ -8,6 +8,7 @@ from app.dto.conversation_dto import QueryRequest, QueryResponse
 from app.models.conversation import MessageStatus
 from app.services.conversation_service import ConversationService
 from app.utils.logger import get_logger
+from langgraph.checkpoint.memory import InMemorySaver  
 
 logger = get_logger(__name__)
 
@@ -47,22 +48,24 @@ class AgentService:
             tools=[web_search, knowledge_base_search],
             response_format=AgentResponse,
             system_prompt=SYSTEM_PROMPT,
+            checkpointer=InMemorySaver()
         )
         logger.info("AgentService initialized successfully")
 
-    def invoke(self, question: str, context_type: str = "default") -> tuple[str, str]:
+    def invoke(self, question: str, context_type: str = "default", thread_id: str = "default") -> tuple[str, str]:
         """Run the agent on a question and return (answer_html, reasoning_text).
 
         Args:
             question: The user's question
             context_type: Hint for tool selection — "web_search", "datasource", or "default"
+            thread_id: Conversation ID used to scope memory checkpointing
         """
         message = self._build_message(question, context_type)
-        logger.info(f"Agent invoke | context_type={context_type} | question={question[:60]}")
+        logger.info(f"Agent invoke | context_type={context_type} | thread_id={thread_id} | question={question[:60]}")
 
         result = self.agent.invoke({
             "messages": [{"role": "user", "content": message}]
-        })
+        }, { "configurable": { "thread_id": thread_id } })
 
         structured: AgentResponse = result.get("structured_response")
         if structured:
@@ -82,7 +85,7 @@ class AgentService:
             raise ValueError("Question cannot be empty")
 
         try:
-            answer, reasoning = self.invoke(req.question, req.context_type)
+            answer, reasoning = self.invoke(req.question, req.context_type, thread_id=req.session_id or "default")
             db_answer = self._combine_for_storage(answer, reasoning)
 
             conversation_id, bot_msg = ConversationService.save_exchange(
