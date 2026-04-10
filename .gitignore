@@ -1,2 +1,9 @@
 .env
+.appenv
+*.pyc
 langchain-env
+chroma_db/
+
+# ChromaDB vector stores
+app2/chroma_db/
+app/chroma_db/
